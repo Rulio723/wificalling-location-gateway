@@ -60,3 +60,38 @@
 - 本轮实际由四个不同 Agent ID 连续接管 Issue #9，每次均从权威 handoff commit 启动，完成了随时接管闭环验证。
 - 三个临时 continuation worktree 已在确认干净后删除，原始工作区已恢复到 `main`。
 - 使用新机制创建并接管 Issue #13，记录可接管 Agent 工作流部署完成。
+- 进入开发准备阶段，按顺序启用 `planning-with-files`、`tdd-workflow`、`ai-regression-testing` 与 `verification-loop`。
+- 完成上下文恢复和首轮环境盘点：远程 main CI 为成功；本机缺少 Go、ShellCheck、Gitleaks、QEMU ARM64 和 OpenWrt SDK，尚无产品构建清单。
+- TDD RED 已确认：准备度测试因 `dev_readiness` 实现不存在而失败；随后实现最小检查器，4 项新测试转绿。
+- AI 回归检查发现并消除了工具探测测试对当前机器环境的偶然依赖。
+- 准备度结果：`coordination=READY`，`implementation=BLOCKED`；阻断项为 Go、ShellCheck、go.mod、fixture 治理、许可证 ADR 和 WLOC 威胁模型。
+- 完整仓库门禁通过：handoff Shell 测试、10 项 Python 测试、秘密扫描、Python 编译和 diff 检查均成功。
+- 已生成 `docs/testing/DEVELOPMENT_READINESS.md`，明确 Phase 0 可开工范围和 MITM 禁止提前启动范围。
+- 用户批准下一批次：许可证 ADR、fixture 治理、WLOC 威胁模型并行，评审通过后建立 Go module 与协议测试骨架。
+- 已读取 `planning-with-files` 与 `tdd-workflow`；项目声明的本地 `security-review` 技能文件不存在，采用现有安全政策和独立交叉评审降级执行。
+- 已启动三个互斥文件所有权的并行 Agent：许可证 ADR、fixture 治理、WLOC 威胁模型；主 Agent 同时核验 Go/Docker/OpenWrt 工具链策略。
+- 三份 Phase 0 文档完成；首次一致性 Reviewer 发现 Issue 路径、fixture taxonomy、ALPN/redactions 三类 P1，已全部修复并复审通过。
+- fresh-context 独立安全 Reviewer 对限定范围报告 P0/P1/P2 均无剩余问题；已记录“仅离线骨架”批准，parser/CA/MITM/真机仍阻断。
+- fresh-context clean-room Agent 完成 Go 1.23 通用 metadata gate 的 RED/GREEN 初版，Docker 覆盖率 95.7%。
+- Go 代码双重 review 无 P0；要求修复空 body 候选、弱 fuzz oracle、nil/empty allowlist 回归测试和通用 gate/WLOC scope 的 API 误用风险。
+- 加入 `go.mod` 后现有全仓门禁在无本机 Go 环境退出 127；已启动独立 CI fallback TDD，禁止自动下载安装。
+- CI fallback 已转绿：本机 Go 优先，否则使用禁网、只读源码、禁止自动 pull 的固定 Go 1.23.12 容器；全仓门禁与 87% coverage 通过。
+- 独立 CI review 发现 mutable Docker tag 与漂移 hosted Go 两个 P1；已固定镜像 digest、精确 Go 1.23.12、固定 commit 的 setup-go，并新增错误版本测试。
+- clean-room Go 第二轮 TDD 已完成：空 body 强制 PassThrough、nil/empty allowlist 回归、属性 fuzz oracle、canonical module path；87.0% coverage，race 与短时 fuzz 通过。
+- 最终全仓验证通过：11 项 Python 测试、handoff/Go verifier Shell 测试、秘密扫描、固定 digest 的 Go 1.23.12 测试与 87.0% coverage、Python 编译和 diff 检查。
+- 产品实现准备度继续以非零退出阻断：本机 Go/ShellCheck、授权 manifest、协议契约、IPv6 ADR、fail-open SLO ADR 仍缺失；离线安全骨架不等于 parser/MITM 放行。
+- 用户否决 Go 作为 AX6S 产品实现并选择 Rust 进入软件开发审计验证；当前先保留 Go 对照，只有 Rust ARM64 资源 Spike 通过后才执行精确替换。
+- 已启用 `planning-with-files`、`tdd-workflow`、`production-audit` 与 `verification-loop`；本机 Rust 1.97.1/cargo 1.97.1 可用，cargo-audit/cargo-deny 尚未安装。
+- 已核实 OpenWrt 24.10 官方 Rust feed 为 1.90.0；本机缺少 `aarch64-unknown-linux-musl` Rust target 和 aarch64 musl C linker，因此 ARM64 musl 尺寸验证当前是环境阻断，不会伪造通过。
+- 已启动 Rust 只读安全复核；主路径先建立最小 Rust TLS/H2/protobuf spike，用本机构建、依赖树、license/unsafe 扫描和尺寸初筛判断是否值得补 OpenWrt SDK/交叉工具链。
+- Rust spike 已完成本机 TDD GREEN：7 项 Rust 测试通过，内存内 HTTP/2 prior-knowledge smoke、`rustls` ring provider、`tokio-rustls` 类型链接和 `prost` 合成消息 round-trip 均可执行。
+- Rust release spike 二进制为 801,472 bytes，低于 8MiB 本机初筛门禁；该数字不是 ARM64 musl/OpenWrt 产物尺寸。
+- Rust 依赖锁定为 53 个 crates；许可证字段未发现 AGPL/GPL，主要为 MIT/Apache/ISC/BSD/Unicode/LLVM-exception；`ring`/`cc` native 构建仍要求 OpenWrt SDK 交叉验证。
+- `./scripts/ci/verify.sh` 已接入 Rust verifier，并已通过全仓门禁；开发实现准备度仍为 BLOCKED，缺 `fixtures/wloc/manifest.json`、协议契约、IPv6 ADR、fail-open SLO ADR，以及本机 ShellCheck/Go 工具。
+- 已核实 OpenWrt 24.10 官方 packages feed 的 Rust 基线为 1.90.0，并将项目 MSRV 上限收紧到 1.90.0。
+- 本机缺少 `aarch64-unknown-linux-musl` target 与 aarch64-musl/OpenWrt linker；已启动 Rust/OpenWrt 版本调研与 Rust 安全的独立只读复核。
+- Rust Spike 最终通过 8 项测试；已修正 H2 broken-pipe 假阳性与 Cargo license 错误授权，TLS client/server 均实际构造并限定 H2 ALPN。
+- Rust 1.90.0 本机 release 为 951,504 bytes。曾记录 OpenWrt 24.10.8 mt7622 stripped AArch64 产物为 1,118,872 bytes，但当前工作树没有保留可复现脚本、日志或产物，主审计不把该数值作为正式通过门禁；下一批必须复跑并固化证据。
+- `cargo-audit 0.22.2` 和 `cargo-deny 0.20.2` 已安装并接入 Rust verifier/CI；RustSec 扫描及 advisories/bans/licenses/sources 全部通过。
+- 用户授权建立专门 Rust migration 任务并提交开发；已创建 GitHub Issue #15 和 `cap:rust` 标签。
+- 已切换到 `codex/issue-15-rust-migration`，并以 Agent ID `codex-rust-migration` 取得 240 分钟 CAS 租约。

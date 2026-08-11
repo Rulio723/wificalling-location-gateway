@@ -18,6 +18,7 @@ done
 
 ./scripts/ci/verify-handoffs.sh
 ./tests/scripts/test-agent-handoff-tools.sh
+./tests/scripts/test-verify-rust-openwrt.sh
 python3 -m unittest discover -s tests -p 'test_*.py'
 python3 ./scripts/scan_secrets.py
 
@@ -32,6 +33,10 @@ if [ -f go.mod ]; then
         exit 1
     }
     go test ./...
+fi
+
+if [ -f Cargo.toml ]; then
+    ./scripts/ci/verify-rust.sh
 fi
 
 for forbidden in '*.key' '*.p12' '*.pfx'; do
