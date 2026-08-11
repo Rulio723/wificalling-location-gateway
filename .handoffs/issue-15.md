@@ -31,6 +31,8 @@ interception, packaging, or deployment.
   and 1,118,352 bytes after stripping.
 - Enforced Clippy, RustSec audit, cargo-deny, and at least 80% line coverage in
   repository verification.
+- Added a required CI job that executes the real pinned OpenWrt cross-build;
+  fake-tool contract tests are not the only merge evidence.
 
 ## Files changed
 
@@ -49,10 +51,11 @@ interception, packaging, or deployment.
 
 | Command | Result | Evidence |
 |---|---|---|
-| `./scripts/ci/verify.sh` | Passed | 14 Rust tests, Clippy, audit/deny, secret scan, repository gates |
-| `cargo llvm-cov --workspace --all-targets --locked --fail-under-lines 80` | Passed | 89.39% line coverage |
+| `./scripts/ci/verify.sh` | Passed | 16 Rust tests, Clippy, audit/deny, secret scan, repository gates |
+| `cargo llvm-cov --workspace --all-targets --locked --fail-under-lines 80` | Passed | 89.92% line coverage |
 | `tests/scripts/test-verify-rust-openwrt.sh` | Passed | pinned-input, checksum, offline, cache-safety, size-boundary tests |
 | `OPENWRT_CROSS_CACHE_DIR=/tmp/wloc-rust-openwrt-issue15 ./scripts/ci/verify-rust-openwrt.sh` | Passed | ELF64/AArch64, Cortex-A53, static, 1,118,352 bytes |
+| independent security/correctness review | Passed | no P0/P1 after real cross-build CI was added |
 
 ## Failed attempts
 

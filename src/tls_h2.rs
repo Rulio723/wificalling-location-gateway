@@ -55,6 +55,7 @@ pub struct TlsH2ExchangeConfig {
 pub struct TlsH2ExchangeReport {
     pub negotiated_alpn: Vec<u8>,
     pub request_path: String,
+    pub request_authority: String,
     pub response_status: u16,
     pub response_body: Vec<u8>,
 }
@@ -101,13 +102,23 @@ pub async fn run_in_memory_tls_h2_exchange(
 fn validate_limits(limits: TlsH2Limits) -> Result<(), TlsH2Error> {
     const MIN_H2_FRAME_BYTES: u32 = 16 * 1024;
     const MAX_H2_FRAME_BYTES: u32 = (1 << 24) - 1;
+    const MAX_IO_CAPACITY_BYTES: usize = 1024 * 1024;
+    const MAX_INITIAL_WINDOW_BYTES: u32 = 16 * 1024 * 1024;
+    const MAX_CONCURRENT_STREAMS: u32 = 16;
+    const MAX_RESPONSE_BODY_BYTES: usize = 1024 * 1024;
+    const MAX_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 
     if limits.io_capacity_bytes < limits.max_frame_bytes as usize
+        || limits.io_capacity_bytes > MAX_IO_CAPACITY_BYTES
         || limits.initial_window_bytes == 0
+        || limits.initial_window_bytes > MAX_INITIAL_WINDOW_BYTES
         || !(MIN_H2_FRAME_BYTES..=MAX_H2_FRAME_BYTES).contains(&limits.max_frame_bytes)
         || limits.max_concurrent_streams == 0
+        || limits.max_concurrent_streams > MAX_CONCURRENT_STREAMS
         || limits.max_response_body_bytes == 0
+        || limits.max_response_body_bytes > MAX_RESPONSE_BODY_BYTES
         || limits.operation_timeout.is_zero()
+        || limits.operation_timeout > MAX_OPERATION_TIMEOUT
     {
         return Err(TlsH2Error::InvalidLimits);
     }
@@ -144,6 +155,7 @@ async fn run_bounded_exchange(
     // negotiates something other than h2 is rejected before any H2 bytes flow.
     client_config.alpn_protocols = vec![REQUIRED_ALPN.to_vec(), b"http/1.1".to_vec()];
 
+    let requested_authority = config.server_name.clone();
     let server_name =
         ServerName::try_from(config.server_name).map_err(|_| TlsH2Error::TlsHandshakeFailed)?;
     let (client_io, server_io) = tokio::io::duplex(config.limits.io_capacity_bytes);
@@ -192,7 +204,7 @@ async fn run_bounded_exchange(
 
     let request = Request::builder()
         .method("GET")
-        .uri(format!("https://localhost{REQUEST_PATH}"))
+        .uri(format!("https://{requested_authority}{REQUEST_PATH}"))
         .body(())
         .map_err(|_| TlsH2Error::H2ProtocolFailed)?;
     let (response_future, _request_body) = request_sender
@@ -205,6 +217,12 @@ async fn run_bounded_exchange(
         .ok_or(TlsH2Error::H2ProtocolFailed)?
         .map_err(|_| TlsH2Error::H2ProtocolFailed)?;
     let request_path = request.uri().path().to_owned();
+    let request_authority = request
+        .uri()
+        .authority()
+        .ok_or(TlsH2Error::H2ProtocolFailed)?
+        .as_str()
+        .to_owned();
     let response = Response::builder()
         .status(200)
         .body(())
@@ -254,6 +272,7 @@ async fn run_bounded_exchange(
     Ok(TlsH2ExchangeReport {
         negotiated_alpn,
         request_path,
+        request_authority,
         response_status,
         response_body,
     })

@@ -37,6 +37,7 @@ async fn approved_hostname_and_h2_complete_request_response_on_one_tls_path() {
 
     assert_eq!(report.negotiated_alpn, b"h2");
     assert_eq!(report.request_path, "/wloc-test");
+    assert_eq!(report.request_authority, APPROVED_HOSTNAME);
     assert_eq!(report.response_status, 200);
     assert_eq!(report.response_body, b"h2-ok");
 }
@@ -99,4 +100,21 @@ fn resource_limits_are_explicit_and_bounded() {
     assert_eq!(limits.max_concurrent_streams, 1);
     assert_eq!(limits.max_response_body_bytes, 8 * 1024);
     assert_eq!(limits.operation_timeout, std::time::Duration::from_secs(2));
+}
+
+#[tokio::test]
+async fn excessive_resource_limits_are_rejected_before_exchange() {
+    let mut config = exchange_config(APPROVED_HOSTNAME, &[b"h2"]);
+    config.limits.io_capacity_bytes = 2 * 1024 * 1024;
+    assert_eq!(
+        run_in_memory_tls_h2_exchange(config, ephemeral_material()).await,
+        Err(TlsH2Error::InvalidLimits)
+    );
+
+    let mut config = exchange_config(APPROVED_HOSTNAME, &[b"h2"]);
+    config.limits.operation_timeout = std::time::Duration::from_secs(31);
+    assert_eq!(
+        run_in_memory_tls_h2_exchange(config, ephemeral_material()).await,
+        Err(TlsH2Error::InvalidLimits)
+    );
 }

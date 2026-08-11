@@ -58,6 +58,11 @@ Build products stay outside the repository under
 `$OPENWRT_CROSS_CACHE_DIR/output/`. Do not commit the binary, expanded
 toolchain, Rust target component, Cargo cache, or generated report.
 
+The `openwrt-cross-build` GitHub Actions job runs this same real build for every
+pull request and push to `main`. The job log is the review-bound record of the
+ELF header, dependency status, and stripped size; a fake-tool test alone cannot
+satisfy the merge gate.
+
 ## TDD evidence
 
 The user journey was derived from Issue #15: as an integration reviewer, I want

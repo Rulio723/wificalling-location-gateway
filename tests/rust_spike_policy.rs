@@ -15,12 +15,22 @@ fn cargo_manifest_pins_openwrt_compatible_rust_and_minimal_features() {
 
 #[test]
 fn rust_sources_do_not_embed_private_material_or_unsafe_blocks() {
-    for path in ["src/lib.rs", "src/main.rs"] {
+    for path in ["src/lib.rs", "src/main.rs", "src/tls_h2.rs"] {
         let content = fs::read_to_string(path).expect("source exists");
         assert!(!content.contains("BEGIN PRIVATE KEY"));
         assert!(!content.contains("api_key"));
         assert!(!content.contains("unsafe"));
     }
+}
+
+#[test]
+fn pull_requests_run_the_real_pinned_openwrt_cross_build() {
+    let workflow = fs::read_to_string(".github/workflows/ci.yml").expect("CI workflow exists");
+
+    assert!(workflow.contains("openwrt-cross-build:"));
+    assert!(workflow.contains("docker pull --platform linux/amd64"));
+    assert!(workflow.contains("rust:1.90.0-slim-bookworm@sha256:64232e656c058f4468e8d024e990acff04f0fd5a5c0a88a574dc37773d7325c9"));
+    assert!(workflow.contains("./scripts/ci/verify-rust-openwrt.sh"));
 }
 
 #[test]
