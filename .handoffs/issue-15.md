@@ -3,7 +3,7 @@
 ## Identity and scope
 
 - Source agent ID: codex-rust-migration
-- Capabilities used: rust, tls-h2, openwrt, ci, security
+- Capabilities used: rust,tls-h2,openwrt,ci,security
 - Branch: codex/issue-15-rust-migration
 - Checkpoint parent: a68bc55693309629510a4f8c873b0cf80587740c
 - Updated at (UTC): 2026-08-11T10:32:02Z
