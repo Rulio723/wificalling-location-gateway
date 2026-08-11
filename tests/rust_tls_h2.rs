@@ -1,7 +1,6 @@
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use wificalling_location_gateway::tls_h2::{
-    run_in_memory_tls_h2_exchange, TlsH2Error, TlsH2ExchangeConfig, TlsH2Limits,
-    TlsH2TestMaterial,
+    run_in_memory_tls_h2_exchange, TlsH2Error, TlsH2ExchangeConfig, TlsH2Limits, TlsH2TestMaterial,
 };
 
 const APPROVED_HOSTNAME: &str = "gs-loc.apple.com";
@@ -64,6 +63,30 @@ async fn server_without_h2_alpn_fails_closed_before_h2_handshake() {
     .expect_err("a TLS connection without negotiated h2 must be closed");
 
     assert_eq!(error, TlsH2Error::H2AlpnRequired);
+}
+
+#[tokio::test]
+async fn response_body_larger_than_configured_limit_fails_closed() {
+    let mut config = exchange_config(APPROVED_HOSTNAME, &[b"h2"]);
+    config.limits.max_response_body_bytes = 4;
+
+    let error = run_in_memory_tls_h2_exchange(config, ephemeral_material())
+        .await
+        .expect_err("response data beyond the configured bound must be rejected");
+
+    assert_eq!(error, TlsH2Error::ResponseBodyTooLarge);
+}
+
+#[tokio::test]
+async fn invalid_h2_frame_limit_is_rejected_before_exchange() {
+    let mut config = exchange_config(APPROVED_HOSTNAME, &[b"h2"]);
+    config.limits.max_frame_bytes = (16 * 1024) - 1;
+
+    let error = run_in_memory_tls_h2_exchange(config, ephemeral_material())
+        .await
+        .expect_err("an H2 frame size below the protocol minimum must be rejected");
+
+    assert_eq!(error, TlsH2Error::InvalidLimits);
 }
 
 #[test]
