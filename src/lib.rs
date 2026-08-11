@@ -5,6 +5,8 @@ use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
+pub mod tls_h2;
+
 pub const APPROVED_WLOC_HOSTS: [&str; 2] = ["gs-loc.apple.com", "gs-loc-cn.apple.com"];
 pub const MAX_WLOC_BODY_BYTES: u64 = 512 * 1024;
 const MIN_H2_FRAME_SIZE: u32 = 16 * 1024;
