@@ -54,3 +54,7 @@ If a task discovers work outside its owned paths, it opens a new Issue. Cross-ro
 - Code owner review for CA, proxy, OpenWrt, or workflow paths.
 - Resolve all review threads and preserve linear history.
 - Delete merged branches; prune worktrees locally after merge.
+
+## Current GitHub account limitation
+
+The repository is private. GitHub rejected server-side branch protection for the current account tier, so CI, CODEOWNERS, and this contract are active but cannot technically prevent the repository owner from pushing directly to `main`. Upgrade the owner to GitHub Pro before adding autonomous write-capable Agents if hard enforcement is required.
