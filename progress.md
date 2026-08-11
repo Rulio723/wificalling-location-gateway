@@ -37,3 +37,22 @@
 - 修复后的 GitHub Actions `repository-gates` 已通过；根据运行器提示将 `actions/checkout` 升级到 v5。
 - 已限制仓库只使用 squash merge，并启用合并后自动删除 Agent 分支。
 - `actions/checkout@v5` 的最终远程 CI 通过；私有仓库、多 Agent 队列、脚本和文档均已部署。
+- 用户要求把单 Agent 独占模型改为不同 API Key/能力的 Agent 可随时接管模型。
+- 已创建 GitHub Issue #9，并在 `codex/issue-9-handoff-leases` 分支开始实现租约与检查点协议。
+- 已将协作模型改为非秘密能力声明、15–1440 分钟短租约、精确 commit 检查点和可续接分支。
+- 已新增 handoff capsule 模板、租约/接管/发布脚本、capsule CI 校验和无网络单元测试。
+- 已把 GitHub `status:claimed` 迁移为 `status:active`，新增 `status:handoff` 和 11 个能力标签。
+- 已为 Issues #1–#9 添加 required capabilities、环境约束和“凭据不交接”契约。
+- 已使用 Issue #9 成功验证真实租约创建、能力匹配、状态转换和结构化租约评论。
+- 独立 Reviewer 发现标签租约 TOCTOU、handoff 发布者校验、commit 可达性、PR 编号一致性和秘密扫描缺口。
+- 已将权威租约/交接状态升级为 Git 原子 CAS refs，并把 Issue 评论降级为只读投影；接管将验证远端可达性并在失败时回滚。
+- 已修复 Reviewer 的关键项：handoff 仅允许当前未过期租约持有人、远端 commit ancestry 校验、PR 三处 Issue 编号强一致、固定 commit 的 Gitleaks、失败清理和仓库根目录归一化。
+- 已新增 Python 状态机测试，实际创建并读取 `agent-leases/issue-9` 原子租约 ref 成功。
+- 已用 `codex-resume-test` 从权威 handoff commit 创建全新 continuation worktree，证明不同 Agent ID 可接管。
+- 接管演练后新增 capsule 的 Issue/Agent/branch/capabilities 与权威 handoff state 强一致校验。
+- 二次 Reviewer 发现 lease/handoff 双 ref 非原子和 takeover 读取顺序竞态；已改为双 ref `git push --atomic`，并在租约线性化后读取 handoff。
+- 已增加本地高置信秘密扫描；明确 CAS 是可信写入 Agent 的协作锁，不是访问控制边界。
+- PR #10 的 PR 契约检查通过；Gitleaks 因缺少只读 PR 元数据权限返回 403。
+- 已由第三个 Agent ID `codex-ci-fix` 从第二个 Agent 的 `8fcc71c...` handoff 接管，并添加最小 `pull-requests: read` 权限。
+- PR #11 的 PR 契约再次通过；Gitleaks 因默认 shallow checkout 缺少扫描范围父提交而失败。
+- 已由第四个 Agent ID `codex-ci-history` 从 `127c25d...` 接管，并为验证 Job 启用完整 Git 历史。
