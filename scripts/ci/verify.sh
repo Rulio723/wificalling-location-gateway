@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+cd "$repo_root"
+
+required_files='AGENTS.md DEVELOPMENT_TEST_PLAN.md SECURITY.md .github/CODEOWNERS .github/PULL_REQUEST_TEMPLATE.md .github/ISSUE_TEMPLATE/agent-task.yml'
+for required_file in $required_files; do
+    if [ ! -s "$required_file" ]; then
+        echo "missing required file: $required_file" >&2
+        exit 1
+    fi
+done
+
+find scripts -type f -name '*.sh' -print | while IFS= read -r script; do
+    sh -n "$script"
+done
+
+if command -v shellcheck >/dev/null 2>&1; then
+    find scripts -type f -name '*.sh' -print | xargs shellcheck
+fi
+
+if [ -f go.mod ]; then
+    test -z "$(gofmt -l .)" || {
+        echo 'gofmt changes required' >&2
+        gofmt -l . >&2
+        exit 1
+    }
+    go test ./...
+fi
+
+for forbidden in '*.key' '*.p12' '*.pfx'; do
+    if find . -path './.git' -prune -o -type f -name "$forbidden" -print | grep -q .; then
+        echo "forbidden secret-like file found: $forbidden" >&2
+        exit 1
+    fi
+done
+
+echo 'repository gates passed'

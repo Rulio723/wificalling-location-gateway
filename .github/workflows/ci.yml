@@ -1,0 +1,41 @@
+name: repository-gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify repository
+        run: ./scripts/ci/verify.sh
+
+  pull-request-contract:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate branch and linked Issue
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          case "$BRANCH_NAME" in
+            codex/issue-[0-9]*-*) ;;
+            *) echo "Branch must match codex/issue-<number>-<slug>" >&2; exit 1 ;;
+          esac
+          printf '%s' "$PR_BODY" | grep -Eq '(Closes|Fixes|Resolves) #[0-9]+' || {
+            echo "PR body must link its task with Closes #<number>" >&2
+            exit 1
+          }

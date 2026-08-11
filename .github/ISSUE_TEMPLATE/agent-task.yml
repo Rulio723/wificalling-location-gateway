@@ -1,0 +1,82 @@
+name: Agent task
+description: An atomic, independently reviewable unit of development work
+title: "[Agent] "
+labels: ["status:triage"]
+body:
+  - type: dropdown
+    id: role
+    attributes:
+      label: Owning role
+      options:
+        - protocol
+        - engine
+        - network
+        - security
+        - test
+        - integration
+    validations:
+      required: true
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Development phase
+      options:
+        - Phase 0 - evidence and protocol freeze
+        - Phase 1 - node exit probe
+        - Phase 2 - Geo resolver
+        - Phase 3 - offline WLOC core
+        - Phase 4 - TLS and HTTP2
+        - Phase 5 - OpenWrt PoC
+        - Phase 6 - device validation
+        - Phase 7 - LuCI and packages
+        - Phase 8 - Gateway integration
+    validations:
+      required: true
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: One outcome that can be completed by one Agent and reviewed independently.
+    validations:
+      required: true
+  - type: textarea
+    id: paths
+    attributes:
+      label: Owned paths
+      description: Exact files or directories this task may modify.
+      placeholder: |
+        - internal/example/
+        - tests/example/
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and blockers
+      placeholder: "Blocked by #123, or None"
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Include executable tests, failure behavior, and evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checklist
+      options:
+        - label: No secrets, private keys, raw production captures, or precise user location will be committed.
+          required: true
+        - label: Failure and rollback behavior is specified.
+          required: true
+        - label: This task respects Phase 0 fixture and license gates.
+          required: true

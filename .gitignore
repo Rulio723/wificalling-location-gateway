@@ -1,0 +1,22 @@
+.DS_Store
+.idea/
+.vscode/
+bin/
+build/
+dist/
+coverage/
+tmp/
+*.log
+*.out
+*.test
+
+# Never commit generated secrets or captured production traffic.
+*.key
+*.pem
+*.p12
+*.pfx
+fixtures/private/
+captures/
+
+# Agent worktrees belong beside the repository, not inside it.
+.worktrees/
