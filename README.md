@@ -50,4 +50,4 @@ See [the multi-Agent workflow](docs/MULTI_AGENT_WORKFLOW.md) and [the developmen
 
 Do not commit private keys, credentials, raw captures, device identifiers, or precise user location. See [SECURITY.md](SECURITY.md).
 
-No open-source license is granted yet. Issue #1 must freeze either an AGPL-compatible reuse path or a clean-room implementation boundary before protocol implementation begins.
+No open-source license is granted yet. The clean-room boundary is accepted only for offline scaffolding; protocol implementation still requires authorized fixture evidence and the remaining Phase 0 security gates.
