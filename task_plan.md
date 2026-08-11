@@ -21,6 +21,28 @@
 | 12. 交接工具与模板 | 完成 | handoff capsule、lease/publish/takeover 脚本与 CI 校验 |
 | 13. GitHub 任务迁移 | 完成 | 状态/能力标签、现有 Issue 能力约束与新流程 |
 | 14. 端到端验证与交付 | 完成 | 模拟释放/接管、PR/CI、远程状态验证 |
+| 15. 开发环境基线 | 完成 | 工具链、仓库、远程 CI 与 Phase 0 门禁清单 |
+| 16. TDD 准备门禁 | 完成 | 先失败的准备度测试、最小检查脚本与回归证据 |
+| 17. AI 回归与验证环 | 完成 | 单元/集成/安全/差异检查和分层结论 |
+| 18. 开发准备交付 | 完成 | 可开工项、阻断项、建议执行顺序与持久化记录 |
+| 19. Phase 0 三轨并行 | 完成 | 许可证 ADR、fixture 治理、WLOC 威胁模型 |
+| 20. Phase 0 交叉评审 | 完成 | 一致性、安全性、可执行性与硬门禁结论 |
+| 21. Go TDD RED | 完成 | module 与协议契约测试先失败的证据 |
+| 22. Go 最小骨架 GREEN | 完成 | go.mod、协议类型/校验骨架、覆盖率门禁 |
+| 23. 批次验证与交付 | 完成 | 全仓测试、安全扫描、准备度复核与接管说明 |
+| 24. Rust 技术路线审计 | 完成 | 目标工具链、依赖、许可证、unsafe 与 OpenWrt 兼容性 |
+| 25. Rust 资源 Spike TDD | 完成 | TLS/H2/protobuf 最小依赖空壳、RED/GREEN 与体积门禁 |
+| 26. ARM64 交叉构建验证 | 需复现 | aarch64-musl/OpenWrt 兼容产物、脚本、日志与 stripped 尺寸 |
+| 27. Go 路线退出审计 | 待开始 | 精确替换清单、历史证据保留、CI/文档迁移 |
+| 28. 独立代码与安全复核 | 完成 | Rust 供应链、unsafe、资源测量和门禁真实性 |
+| 29. 最终验证与 Go/No-Go | 完成 | 全仓验证、生产审计评分、下一阶段放行范围 |
+| 30. Rust migration Issue 与租约 | 完成 | GitHub Issue #15、`cap:rust`、独立分支与权威租约 |
+| 31. Migration TDD RED | 进行中 | TLS-over-H2 负向/正向集成测试与 cross-build 脚本契约测试 |
+| 32. TLS-over-H2 GREEN | 待开始 | 内存 TLS 握手、SAN/ALPN fail-closed 和 H2 request/response |
+| 33. OpenWrt cross-build GREEN | 待开始 | 固定 digest 工具链、离线构建、ELF/动态依赖/尺寸报告 |
+| 34. Go 退出与 CI 迁移 | 待开始 | 删除 Go 对照、Rust-only verifier/workflow/readiness |
+| 35. 覆盖率与安全复核 | 待开始 | ≥80% Rust coverage、依赖/秘密扫描、独立 Reviewer |
+| 36. 提交、handoff、PR 与 CI | 待开始 | TDD 证据、commit、远程分支、PR 和 GitHub Actions |
 
 ## 约束与原则
 
@@ -47,6 +69,11 @@
 - Agent 身份、API Key 和登录凭据始终留在各自环境；仓库只记录非秘密能力声明和可复现环境要求。
 - Issue 所有权改为有期限的协作租约；租约可主动释放，过期租约可由符合能力要求的 Agent 接管。
 - 每次释放或长时间暂停前必须推送精确 commit，并更新 `.handoffs/issue-<n>.md`；聊天记录不能替代交接胶囊。
+- 开发准备采用分层结论：协作基础设施可用不等于 WLOC 产品实现已满足 Phase 0 门禁。
+- 本轮不安装系统级工具、不推送远程、不实现协议代码；只在仓库内建立可复现的准备度检查并执行验证。
+- Phase 0 三份文档由独立 Agent 并行起草、主 Agent 交叉评审；任一未通过时不得创建 WLOC parser/patch 实现。
+- Go 骨架只定义安全的协议输入/输出契约和验证边界，不包含基于未授权捕获推断的 Apple 私有协议字段；它现在仅作为待替换的实验对照，不再代表产品语言决策。
+- Rust 是新的候选平衡路线；本机 Rust 1.90 审计和供应链门禁已通过，但替换 Go 前必须把 OpenWrt/AArch64 cross-build 做成仓库内可复现脚本，并保留可审计日志/产物尺寸证据。
 
 ## 错误记录
 
@@ -61,3 +88,10 @@
 | PR #10 的固定 SHA Gitleaks Action 返回 HTTP 403 | 1 | 增加最小 `pull-requests: read` workflow 权限；保留 `contents: read`，不授予写权限 |
 | PR #11 的 Gitleaks 因浅克隆缺少父提交而失败 | 1 | 验证 Job 的 `actions/checkout@v5` 设置 `fetch-depth: 0`，使完整 PR commit range 可扫描 |
 | 清理已合并 continuation 分支时最后一个本地分支不存在 | 1 | `gh pr merge --delete-branch` 已自动移除该分支；其他三个临时分支和 worktree 均已按精确路径清理 |
+| AGENTS 声明的 `.agents/skills/security-review/SKILL.md` 实际不存在 | 1 | 使用仓库 `SECURITY.md`、开发计划安全门禁和主 Agent 交叉评审替代，并记录为技能供应缺口 |
+| 完整历史分叉再次与显式 Reviewer 角色组合导致启动失败 | 3 | 改用有限 4 回合上下文的 Reviewer；后续 Reviewer 一律不得使用 `fork_turns=all` 加显式角色 |
+| 新增 `go.mod` 后仓库门禁因本机缺少 `gofmt`/`go` 退出 127 | 1 | 保留为 CI 适配 RED；实现本机 Go 优先、固定只读 Docker fallback 的 Go 验证器 |
+| 追加只读容器 fuzz seed 验证使用 64MB `/tmp` 导致 Go 编译缓存耗尽 | 1 | 保留全仓门禁已通过事实；改用 256MB 临时缓存重新运行，不重复不足空间配置 |
+| 256MB `/tmp` 保留 `noexec` 导致 Go 测试二进制 permission denied | 2 | Go 测试必须执行临时构建产物；保留 `nosuid/nodev`、禁网和只读源码，仅移除临时盘 `noexec` 后做最后一次验证 |
+| Docker `--tmpfs /tmp` 去除显式 `noexec` 后测试二进制仍不可执行 | 3 | 停止这条额外实验；采用已成功的 `verify-go.sh` 独立 cache bind 方案作为权威验证路径，不继续扩大容器调参范围 |
+| TLS RED checkpoint 首次主端复跑被 `--locked` 拒绝 | 1 | 直接添加 `http` 依赖后未刷新 root package lock 依赖列表；保留 Agent 先前 1 pass/3 fail 的有效 RED 证据，立即离线刷新 lock 并再跑目标测试 |
