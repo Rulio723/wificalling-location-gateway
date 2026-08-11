@@ -35,3 +35,5 @@
 - 尝试启用 `main` 分支保护时 GitHub 返回 HTTP 403：当前个人账号需升级 GitHub Pro；仓库继续保持私有，未降级为公开。
 - 远程首轮 CI 暴露两个本机未安装 ShellCheck 时未发现的可移植性警告；已修复 SC1007 与 SC2038，准备重新验证。
 - 修复后的 GitHub Actions `repository-gates` 已通过；根据运行器提示将 `actions/checkout` 升级到 v5。
+- 已限制仓库只使用 squash merge，并启用合并后自动删除 Agent 分支。
+- `actions/checkout@v5` 的最终远程 CI 通过；私有仓库、多 Agent 队列、脚本和文档均已部署。
