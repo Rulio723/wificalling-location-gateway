@@ -23,7 +23,7 @@ case "$rust_version" in
     ;;
 esac
 
-for audit_tool in cargo-audit cargo-deny; do
+for audit_tool in cargo-audit cargo-deny cargo-llvm-cov; do
   if ! command -v "$audit_tool" >/dev/null 2>&1; then
     echo "$audit_tool is required for Rust verification" >&2
     exit 127
@@ -31,7 +31,8 @@ for audit_tool in cargo-audit cargo-deny; do
 done
 
 cargo fmt --all -- --check
-cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
+cargo llvm-cov --workspace --all-targets --locked --fail-under-lines 80
 cargo build --locked --release --bin wloc-gateway-spike
 cargo audit --file Cargo.lock
 cargo deny check
