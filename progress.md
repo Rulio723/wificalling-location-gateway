@@ -30,3 +30,7 @@
 - 已建立六角色多 Agent 合约、目录所有权、独立 worktree/分支规则和跨角色复核要求。
 - 已新增 Issue Form、PR 模板、CODEOWNERS、CI 门禁、Issue claim 与 worktree 工具。
 - 本地仓库门禁、Shell 语法、ShellCheck、YAML 解析和 `git diff --check` 均通过。
+- 已创建并推送私有仓库 `smthdagg/wificalling-location-gateway`。
+- 已创建 19 个职责/状态/阶段标签、3 个里程碑和 8 个原子任务；其中 7 个可并行，#8 由 #1/#2/#3 阻塞。
+- 尝试启用 `main` 分支保护时 GitHub 返回 HTTP 403：当前个人账号需升级 GitHub Pro；仓库继续保持私有，未降级为公开。
+- 远程首轮 CI 暴露两个本机未安装 ShellCheck 时未发现的可移植性警告；已修复 SC1007 与 SC2038，准备重新验证。

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repo_root"
 
 required_files='AGENTS.md DEVELOPMENT_TEST_PLAN.md SECURITY.md .github/CODEOWNERS .github/PULL_REQUEST_TEMPLATE.md .github/ISSUE_TEMPLATE/agent-task.yml'
@@ -17,7 +17,7 @@ find scripts -type f -name '*.sh' -print | while IFS= read -r script; do
 done
 
 if command -v shellcheck >/dev/null 2>&1; then
-    find scripts -type f -name '*.sh' -print | xargs shellcheck
+    find scripts -type f -name '*.sh' -exec shellcheck {} +
 fi
 
 if [ -f go.mod ]; then

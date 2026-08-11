@@ -55,3 +55,4 @@
 - `smthdagg/wificalling-location-gateway` 当前不存在，创建不会覆盖远程项目。
 - 计划推荐 Go，而不是 C + TLS/nghttp2；多 Agent 首批任务应先覆盖协议证据、威胁模型、测试夹具、出口探测和 OpenWrt 隔离设计。
 - GitHub Projects v2 不是首期硬依赖；Issue + 标签 + Milestone + PR 已足以形成可审计任务队列，避免额外 project scope 和自动化复杂度。
+- GitHub API 明确拒绝为当前账号的私有仓库启用 branch protection（HTTP 403，要求 GitHub Pro 或公开仓库）。这不影响私有仓库、Issues、Actions 和 PR，但服务端无法强制禁止管理员直推。
