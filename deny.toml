@@ -1,0 +1,16 @@
+[licenses]
+confidence-threshold = 0.95
+unused-allowed-license = "deny"
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-3-Clause",
+  "ISC",
+  "MIT",
+  "Unicode-3.0",
+]
+
+# The repository is deliberately unlicensed until the license ADR is closed.
+# This exception applies only to unpublished workspace crates, not dependencies.
+[licenses.private]
+ignore = true

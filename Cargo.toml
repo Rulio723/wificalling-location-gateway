@@ -1,0 +1,29 @@
+[package]
+name = "wificalling-location-gateway"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+publish = false
+
+[lib]
+name = "wificalling_location_gateway"
+path = "src/lib.rs"
+
+[[bin]]
+name = "wloc-gateway-spike"
+path = "src/main.rs"
+
+[dependencies]
+bytes = "=1.12.1"
+h2 = "=0.4.15"
+prost = { version = "=0.14.4", default-features = false, features = ["derive"] }
+rustls = { version = "=0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
+tokio = { version = "=1.48.0", default-features = false, features = ["io-util", "macros", "rt"] }
+tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+panic = "abort"
+strip = "symbols"

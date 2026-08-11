@@ -4,6 +4,7 @@
 bin/
 build/
 dist/
+target/
 coverage/
 tmp/
 *.log
