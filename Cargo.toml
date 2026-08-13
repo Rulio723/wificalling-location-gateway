@@ -3,6 +3,8 @@ name = "wificalling-location-gateway"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.90"
+license = "MIT"
+repository = "https://github.com/smthdagg/wificalling-location-gateway"
 publish = false
 
 [lib]
@@ -13,17 +15,32 @@ path = "src/lib.rs"
 name = "wloc-gateway-spike"
 path = "src/main.rs"
 
+[[bin]]
+name = "wloc-service"
+path = "src/bin/wloc-service.rs"
+
+[[bin]]
+name = "wloc-ctl"
+path = "src/bin/wloc-ctl.rs"
+
 [dependencies]
+base64 = "=0.22.1"
 bytes = "=1.12.1"
 h2 = "=0.4.15"
 http = "=1.5.0"
 prost = { version = "=0.14.4", default-features = false, features = ["derive"] }
+ring = { version = "0.17", features = ["std"] }
+rcgen = { version = "=0.14.9", default-features = false, features = ["ring"] }
 rustls = { version = "=0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
-tokio = { version = "=1.48.0", default-features = false, features = ["io-util", "macros", "rt", "time"] }
+serde = { version = "=1.0.228", default-features = false, features = ["derive", "std"] }
+socket2 = { version = "0.5", features = ["all"] }
+serde_json = { version = "=1.0.145", default-features = false, features = ["std"] }
+time = { version = "0.3", features = ["std"] }
+tokio = { version = "=1.48.0", default-features = false, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "time"] }
 tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "=1.0.9"
 
 [dev-dependencies]
-rcgen = { version = "=0.14.9", default-features = false, features = ["ring"] }
 
 [profile.release]
 codegen-units = 1

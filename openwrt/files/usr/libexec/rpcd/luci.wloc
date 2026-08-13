@@ -1,0 +1,223 @@
+#!/bin/sh
+# luci.wloc — rpcd exec plugin bridging LuCI to the wloc-service control plane.
+#
+# Protocol (rpcd exec plugin): `$0 list` prints the method table, `$0 call
+# <method>` receives the JSON params on stdin. Every method is whitelisted
+# below and every value passes as argv to /usr/sbin/wloc-ctl — never through
+# a shell. The root-only daemon socket is never exposed to LuCI.
+
+. /usr/share/libubox/jshn.sh
+
+CTL=/usr/sbin/wloc-ctl
+EXPORT=/usr/sbin/export-mobileconfig.sh
+
+ctl_live() {
+	out="$("$CTL" "$@" 2>&1)" && return 0
+	# A pre-package hand deployment may leave an untracked process holding
+	# port 8443 after its control socket dies.  Remove only this service's
+	# process before handing lifecycle ownership back to procd.
+	killall -q wloc-service >/dev/null 2>&1 || true
+	rm -f /var/run/wloc-service/control.sock
+	/etc/init.d/wloc-service restart >/dev/null 2>&1 || return 1
+	retry=0
+	while [ "$retry" -lt 10 ]; do
+		sleep 1
+		out="$("$CTL" "$@" 2>&1)" && return 0
+		retry=$((retry + 1))
+	done
+	return 1
+}
+
+case "$1" in
+list)
+	json_init
+	json_add_object ctl
+	json_close_object
+	json_add_object regen_profile
+	json_close_object
+	json_add_object cert_info
+	json_close_object
+	json_add_object regen_ca
+	json_close_object
+	json_add_object restart_service
+	json_close_object
+	json_add_object verify_fingerprint
+	json_close_object
+	json_dump
+	json_cleanup
+	;;
+call)
+	case "$2" in
+	ctl)
+		read -r input
+		json_load "$input"
+		json_get_var method method
+		json_get_var query query
+		json_get_var lat lat
+		json_get_var lon lon
+
+		case "$method" in
+		status|disable|reload|geo-clear)
+			out="$("$CTL" "$method" 2>&1)"
+			;;
+		enable)
+			ctl_live enable
+			;;
+		mode-set)
+			case "$query" in
+			auto)
+				mode_method=geo-clear
+				;;
+			manual)
+				if [ -z "$lat" ] || [ "$lat" = "null" ] \
+				   || [ -z "$lon" ] || [ "$lon" = "null" ]; then
+					echo '{"error":"manual mode requires latitude and longitude"}'
+					exit 1
+				fi
+				mode_method=geo-set
+				;;
+			*)
+				echo '{"error":"mode must be auto or manual"}'
+				exit 1
+				;;
+			esac
+			if [ "$(uci -q get wloc-service.main.enabled)" = "1" ]; then
+				ctl_live enable || {
+					json_init
+					json_add_string error "$out"
+					json_dump
+					exit 1
+				}
+			fi
+			if [ "$mode_method" = "geo-set" ]; then
+				ctl_live geo-set --lat "$lat" --lon "$lon"
+			else
+				ctl_live geo-clear
+			fi
+			if [ "$?" -eq 0 ]; then
+				uci -q set "wloc-service.main.geo_source=$query" \
+					&& { [ "$query" != "manual" ] \
+						|| { uci -q set "wloc-service.main.manual_lat=$lat" \
+							&& uci -q set "wloc-service.main.manual_lon=$lon"; }; } \
+					&& uci -q commit wloc-service
+			fi
+			;;
+		geo-search)
+			if [ -n "$query" ] && [ "$query" != "null" ]; then
+				out="$("$CTL" geo-search --query "$query" 2>&1)"
+			else
+				echo '{"error":"geo-search 需要 --query 地名"}'
+				exit 1
+			fi
+			;;
+		geo-set)
+			if [ -n "$query" ] && [ "$query" != "null" ]; then
+				out="$("$CTL" geo-set --query "$query" 2>&1)"
+			elif [ -n "$lat" ] && [ "$lat" != "null" ] \
+			     && [ -n "$lon" ] && [ "$lon" != "null" ]; then
+				out="$("$CTL" geo-set --lat "$lat" --lon "$lon" 2>&1)"
+			else
+				echo '{"error":"geo-set needs --query or --lat --lon"}'
+				exit 1
+			fi
+			;;
+		*)
+			echo '{"error":"unknown control method"}'
+			exit 1
+			;;
+		esac
+		rc=$?
+		if [ "$rc" -ne 0 ]; then
+			json_init
+			json_add_string error "$out"
+			json_dump
+			exit 1
+		fi
+		# The daemon reply is a framed JSON envelope; pass the result
+		# object through unchanged.
+		result="$(echo "$out" | jsonfilter -qe '@.result')"
+		[ -n "$result" ] || result="$out"
+		echo "{\"result\":$result}"
+		exit 0
+		;;
+	regen_profile)
+		if [ ! -x "$EXPORT" ]; then
+			json_init
+			json_add_string error "export-mobileconfig.sh 未安装"
+			json_dump
+			exit 1
+		fi
+		out="$("$EXPORT" 2>&1)"
+		if [ "$?" -ne 0 ]; then
+			json_init
+			json_add_string error "$out"
+			json_dump
+			exit 1
+		fi
+		json_init
+		json_add_boolean ok 1
+		json_add_string url "http://192.168.31.1/wloc-ca.mobileconfig"
+		json_dump
+		exit 0
+		;;
+	cert_info)
+		if [ -f /etc/wloc-service/ca.info.json ]; then
+			cat /etc/wloc-service/ca.info.json
+		else
+			echo '{"error":"CA 信息文件不存在，请先启动 wloc-service"}'
+		fi
+		exit 0
+		;;
+	verify_fingerprint)
+		read -r input
+		json_load "$input"
+		json_get_var fingerprint fingerprint
+		if [ -z "$fingerprint" ] || [ "$fingerprint" = "null" ]; then
+			echo '{"error":"请粘贴 iPhone 上显示的证书指纹"}'
+			exit 1
+		fi
+		if [ ! -f /etc/wloc-service/ca.info.json ]; then
+			echo '{"error":"CA 信息文件不存在，请先启动 wloc-service"}'
+			exit 1
+		fi
+		gw="$(jsonfilter -i /etc/wloc-service/ca.info.json -e '@.fingerprint')"
+		norm() { echo "$1" | tr -d ':' | tr '[:lower:]' '[:upper:]' | tr -d ' '; }
+		if [ "$(norm "$fingerprint")" = "$(norm "$gw")" ]; then
+			echo "{\"match\":true,\"gateway_fingerprint\":\"$gw\"}"
+		else
+			echo "{\"match\":false,\"gateway_fingerprint\":\"$gw\"}"
+		fi
+		exit 0
+		;;
+	restart_service)
+		# Re-sync the redirect rules first (the followed device may have
+		# changed), then restart the daemon so it reads the new config.
+		/usr/sbin/wloc-redirect-sync.sh >/dev/null 2>&1 || true
+		/etc/init.d/wloc-service restart >/dev/null 2>&1
+		sleep 2
+		echo '{"ok":true}'
+		exit 0
+		;;
+	regen_ca)
+		# Regenerate the root CA: remove the persisted key/cert, restart the
+		# daemon (procd respawns and creates a fresh CA + info), then rewrite
+		# the iOS profile. The iPhone must reinstall and re-trust the CA.
+		rm -f /etc/wloc-service/ca.pem /etc/wloc-service/ca.key /etc/wloc-service/ca.info.json
+		/usr/sbin/wloc-redirect-sync.sh >/dev/null 2>&1 || true
+		/etc/init.d/wloc-service restart >/dev/null 2>&1
+		sleep 3
+		if [ ! -f /etc/wloc-service/ca.info.json ]; then
+			json_init
+			json_add_string error "重新生成证书失败，请检查 wloc-service 状态"
+			json_dump
+			exit 1
+		fi
+		if [ -x "$EXPORT" ]; then
+			"$EXPORT" >/dev/null 2>&1
+		fi
+		cat /etc/wloc-service/ca.info.json
+		exit 0
+		;;
+	esac
+	;;
+esac
