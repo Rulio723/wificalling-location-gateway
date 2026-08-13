@@ -387,6 +387,47 @@ mod tests {
     }
 
     #[test]
+    fn fallback_utc_offset_covers_all_three_sign_branches() {
+        // The longitude-derived timezone fallback is used when reverse
+        // geocoding returns no known country mapping: zero rounds to plain
+        // UTC, positive longitudes become UTC+N, negative become UTC-N.
+        assert_eq!(fallback_utc_offset(0.0), "UTC");
+        assert_eq!(fallback_utc_offset(75.0), "UTC+5");
+        assert_eq!(fallback_utc_offset(-30.0), "UTC-2");
+    }
+
+    #[test]
+    fn geocode_error_display_messages() {
+        assert_eq!(GeocodeError::NotFound.to_string(), "place not found");
+        assert_eq!(
+            GeocodeError::InvalidData.to_string(),
+            "geocoder returned invalid data"
+        );
+        assert_eq!(
+            GeocodeError::Unreachable.to_string(),
+            "geocoder unreachable"
+        );
+    }
+
+    #[test]
+    fn parse_lat_lon_rejects_missing_or_malformed_longitude() {
+        // A lon field that is absent or not parseable must fail as invalid
+        // data rather than silently defaulting to longitude 0.
+        assert_eq!(
+            parse_lat_lon(&serde_json::from_str(r#"{"lat":"10.0"}"#).unwrap()),
+            Err(GeocodeError::InvalidData)
+        );
+        assert_eq!(
+            parse_lat_lon(&serde_json::from_str(r#"{"lat":"10.0","lon":"not-a-number"}"#).unwrap()),
+            Err(GeocodeError::InvalidData)
+        );
+        assert_eq!(
+            parse_lat_lon(&serde_json::from_str(r#"{"lat":"95","lon":"10"}"#).unwrap()),
+            Err(GeocodeError::InvalidData)
+        );
+    }
+
+    #[test]
     fn parse_response_with_name_extracts_display_name() {
         let body = br#"[{"lat":"35.6768601","lon":"139.7638947","display_name":"Tokyo, Japan"}]"#;
         let result = parse_geocode_response_with_name(body).unwrap();
@@ -464,6 +505,68 @@ mod tests {
         });
         let (lat, lon) = geocode_at("127.0.0.1", port, "London").unwrap();
         assert_eq!((lat, lon), (51.5074, -0.1278));
+    }
+
+    #[test]
+    fn reverse_geocode_at_parses_a_mock_http_response_off_the_control_path() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = [0_u8; 1024];
+            let count = sock.read(&mut buf).unwrap();
+            let request = String::from_utf8_lossy(&buf[..count]);
+            assert!(request.starts_with("GET /reverse?lat=51.5074&lon=-0.1278"));
+            let body = br#"{"display_name":"London, UK","address":{"city":"London","country_code":"gb"},"timezone":"Europe/London"}"#;
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            sock.write_all(head.as_bytes()).unwrap();
+            sock.write_all(body).unwrap();
+        });
+
+        let result = reverse_geocode_at("127.0.0.1", port, 51.5074, -0.1278).unwrap();
+        assert_eq!(result.city, "London");
+        assert_eq!(result.country_code, "GB");
+        assert_eq!(result.timezone, "Europe/London");
+    }
+
+    #[test]
+    fn reverse_geocode_at_rejects_malformed_and_oversized_http_responses() {
+        use std::io::{Read, Write};
+
+        fn serve_once(response: Vec<u8>) -> u16 {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            std::thread::spawn(move || {
+                let (mut sock, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 1024];
+                let _ = sock.read(&mut request).unwrap();
+                sock.write_all(&response).unwrap();
+            });
+            port
+        }
+
+        let malformed_port = serve_once(b"HTTP/1.1 200 OK\r\nmissing separator".to_vec());
+        assert_eq!(
+            reverse_geocode_at("127.0.0.1", malformed_port, 1.0, 2.0),
+            Err(GeocodeError::InvalidData)
+        );
+
+        let body = vec![b'x'; MAX_RESPONSE_BYTES + 1];
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        let mut oversized = head.into_bytes();
+        oversized.extend_from_slice(&body);
+        let oversized_port = serve_once(oversized);
+        assert_eq!(
+            reverse_geocode_at("127.0.0.1", oversized_port, 1.0, 2.0),
+            Err(GeocodeError::InvalidData)
+        );
     }
 
     #[test]

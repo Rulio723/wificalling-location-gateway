@@ -23,6 +23,72 @@ const WAN_V4: IpAddr = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
 const EXIT_A: IpAddr = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
 const EXIT_B: IpAddr = IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9));
 
+#[test]
+fn coordinate_mode_switch_is_local_only_and_never_waits_for_reverse_geocoding() {
+    let source = include_str!("../src/app.rs");
+    let block = source
+        .split("pub fn set_manual_location")
+        .nth(1)
+        .expect("manual location implementation")
+        .split("pub fn clear_manual_location")
+        .next()
+        .expect("manual location function boundary");
+    assert!(
+        !block.contains("reverse_geocode("),
+        "a fixed-coordinate mode switch must update locally without blocking the control socket"
+    );
+}
+
+#[test]
+fn dispatch_geo_set_and_clear_drive_the_real_service() {
+    // The RPC bridge routes geo.set/geo.clear through the real dispatch
+    // implementation: coordinates publish a manual target, clearing returns
+    // to automatic node-following (regression for the mode-switch fix).
+    use serde_json::json;
+    use wificalling_location_gateway::service::api::{decode_request, SERVICE_API_ID};
+    use wificalling_location_gateway::service::dispatch::dispatch;
+
+    let now = 1_000_000;
+    let mut service = build(
+        OkRuntime {
+            healthy: true,
+            install_fails: false,
+        },
+        fresh_probe(),
+        fresh_geo(now),
+    );
+
+    let set = decode_request(
+        &serde_json::to_vec(&json!({
+            "api_version": SERVICE_API_ID,
+            "request_id": "req-set",
+            "method": "geo.set",
+            "params": { "latitude": 22.3193, "longitude": 114.1694 }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let response = dispatch(&set, &mut service).unwrap();
+    let parsed: serde_json::Value = serde_json::from_slice(&response).unwrap();
+    assert_eq!(parsed["result"], json!({}));
+    assert_eq!(service.status_at(now).unwrap()["geo_source"], "manual");
+
+    let clear = decode_request(
+        &serde_json::to_vec(&json!({
+            "api_version": SERVICE_API_ID,
+            "request_id": "req-clear",
+            "method": "geo.clear",
+            "params": {}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let response = dispatch(&clear, &mut service).unwrap();
+    let parsed: serde_json::Value = serde_json::from_slice(&response).unwrap();
+    assert_eq!(parsed["result"], json!({}));
+    assert_eq!(service.status_at(now).unwrap()["geo_source"], "auto");
+}
+
 fn limits() -> ProbeLimits {
     ProbeLimits {
         max_observation_age: Duration::from_secs(60),
@@ -458,13 +524,13 @@ fn status_file_and_target_events_are_written() {
         status["geo"]["latitude"].is_number(),
         "status file must carry GPS"
     );
-    // A manual preset is the effective target: the status file shows the
-    // manual coordinates. Country/city may come from a best-effort reverse
-    // geocode (network) or be null when it fails - coordinates are the
-    // authoritative part.
+    // A manual preset is the effective target. The control operation is
+    // deliberately local-only, so optional place metadata remains null.
     assert_eq!(status["geo"]["latitude"], 51.5074);
     assert_eq!(status["geo"]["longitude"], -0.1278);
-    assert!(status["geo"]["country_code"].is_null() || status["geo"]["country_code"].is_string());
+    assert!(status["geo"]["country_code"].is_null());
+    assert!(status["geo"]["city"].is_null());
+    assert!(status["geo"]["timezone"].is_null());
 
     let events_text = std::fs::read_to_string(&events_path).unwrap();
     assert!(

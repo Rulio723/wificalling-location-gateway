@@ -17,27 +17,47 @@ fail() {
 [ -x "$matrix" ] || fail "missing executable $matrix"
 [ -x "$runtime_builder" ] || fail "missing executable $runtime_builder"
 
+grep -F '\$\$required' "$builder" >/dev/null ||
+	fail 'package post-install must preserve the full prerequisite path through Make'
+grep -F 'mkdir -p /var/run/wificalling-gateway' "$builder" >/dev/null ||
+	fail 'release post-install must create the volatile Gateway runtime directory before restart'
+grep -F 'chmod 0700 /var/run/wificalling-gateway' "$builder" >/dev/null ||
+	fail 'release post-install must restrict the Gateway runtime directory'
+grep -F 'rm -f /tmp/luci-indexcache.*' "$builder" >/dev/null ||
+	fail 'release post-install must invalidate every LuCI menu cache variant'
+if grep -F 'wloc-docker-smoke-deps' "$matrix" >/dev/null; then
+	fail 'Docker verification must use real 25.x rootfs prerequisites, not conflicting fake providers'
+fi
+grep -F 'SHA256SUMS' "$matrix" >/dev/null ||
+	fail 'Docker verification must bind tested packages to the release checksum manifest'
+grep -F 'manifest_entries=' "$matrix" >/dev/null ||
+	fail 'Docker verification must select install artifacts from the checksum manifest'
+grep -F 'unexpected release package not listed in SHA256SUMS' "$matrix" >/dev/null ||
+	fail 'Docker verification must reject unlisted matching release packages'
+if grep -F 'shasum -a 256 ./wificalling-location-gateway' "$builder" >/dev/null; then
+	fail 'release builder must write basename-only SHA256SUMS entries'
+fi
+grep -F 'luci-app-wificalling-gateway.json' "$builder" >/dev/null ||
+	fail 'integrated release builder must remove the standalone Gateway LuCI menu'
+
 printf '#!/bin/sh\nexit 0\n' > "$tmp/wloc-service"
 printf '#!/bin/sh\nexit 0\n' > "$tmp/wloc-ctl"
 chmod 0755 "$tmp/wloc-service" "$tmp/wloc-ctl"
 
 plan=$(
 	"$builder" --plan \
-		--version 0.1.0 \
-		--release 3 \
 		--arch x86_64 \
 		--service-bin "$tmp/wloc-service" \
 		--ctl-bin "$tmp/wloc-ctl"
 )
 
-printf '%s\n' "$plan" | grep -F 'wloc-service_0.1.0-r3_x86_64.ipk' >/dev/null ||
-	fail '24.10 runtime IPK must be architecture-specific'
-printf '%s\n' "$plan" | grep -F 'luci-app-wificalling-location-gateway_0.1.0-r3_all.ipk' >/dev/null ||
-	fail '24.10 LuCI IPK must remain architecture-independent'
-printf '%s\n' "$plan" | grep -F 'wloc-service-0.1.0-r3.apk' >/dev/null ||
-	fail '25.12 runtime APK must be planned'
-printf '%s\n' "$plan" | grep -F 'luci-app-wificalling-location-gateway-0.1.0-r3.apk' >/dev/null ||
-	fail '25.12 LuCI APK must be planned'
+printf '%s\n' "$plan" | grep -F 'wificalling-location-gateway_1.0.0-r1_x86_64.ipk' >/dev/null ||
+	fail '24.10 must produce one architecture-specific integrated IPK'
+printf '%s\n' "$plan" | grep -F 'wificalling-location-gateway-1.0.0-r1.apk (arch: x86_64)' >/dev/null ||
+	fail '25.12 must produce one architecture-specific integrated APK'
+if printf '%s\n' "$plan" | grep -E 'wloc-service[_-]|luci-app-wificalling-location-gateway[_-]' >/dev/null; then
+	fail 'formal 1.0.0 plan must not expose split component packages'
+fi
 printf '%s\n' "$plan" | grep -F 'ghcr.io/openwrt/sdk:x86_64-24.10.8@sha256:b28d5e4087dbd3f815a8bf5440a11e54e6bbd3d7400c3729d872e7940a4a77c1' >/dev/null ||
 	fail '24.10 SDK image must be immutable'
 printf '%s\n' "$plan" | grep -F 'ghcr.io/openwrt/sdk:x86_64-25.12.3@sha256:a0ab488698b70d6585dc35bebb77b3f6d9523fd68873fab78a1bd19cc123cd0f' >/dev/null ||
@@ -61,12 +81,15 @@ grep -F 'dedicated openwrt-release directory' "$tmp/err" >/dev/null ||
 
 matrix_plan=$("$matrix" --plan --dist-dir "$tmp")
 for expected in \
+	'Redmi AX6S / OpenWrt 24.10.5|opkg|ghcr.io/openwrt/rootfs:aarch64_generic-24.10.5' \
 	'OpenWrt 24.10.8|opkg|ghcr.io/openwrt/rootfs:x86_64-24.10.8' \
 	'OpenWrt 25.12.3|apk|ghcr.io/openwrt/rootfs:x86_64-25.12.3' \
 	'iStoreOS 24.10.5|opkg|wukongdaily/openwrt-istoreos:amd64-latest'; do
 	printf '%s\n' "$matrix_plan" | grep -F "$expected" >/dev/null ||
 		fail "missing Docker matrix row: $expected"
 done
+printf '%s\n' "$matrix_plan" | grep -F 'sha256:93f980c266b9b68e3085f3eee7909c04f1dc4061047558e18a9ef12aec43efa9' >/dev/null ||
+	fail 'AX6S-compatible AArch64 rootfs image must be immutable'
 printf '%s\n' "$matrix_plan" | grep -F 'sha256:9972a4b4747cd136abd597475d7b88c51a49fd849d0d53f069a2f4bf446061b9' >/dev/null ||
 	fail '24.10 rootfs image must be immutable'
 printf '%s\n' "$matrix_plan" | grep -F 'sha256:af882e0583954fc2ceac6b081a9d214fc739cfea36a29b48795a5f15563aa3b5' >/dev/null ||
