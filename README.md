@@ -120,7 +120,27 @@ Redmi AX6S 使用单一的架构专用集成包：
 `wificalling-location-gateway`，内含 Wi‑Fi Calling Gateway 1.7、WLOC
 服务、控制工具和统一 LuCI；不再要求用户分别安装组件包。
 
-从 [Releases](https://github.com/smthdagg/wificalling-location-gateway/releases) 下载对应文件，并先校验同一发布目录中的 `SHA256SUMS`。
+两种安装方式：
+
+**方式 A — 包源安装（推荐）**：添加签名包源后直接 `opkg install`：
+
+```sh
+# 导入源签名公钥（一次性）
+wget -O /etc/opkg/keys/ddf1cd5d87a4b793 \
+  https://raw.githubusercontent.com/smthdagg/wificalling-location-gateway-feed/main/wloc.pub
+# 添加源并安装
+echo "src/gz wloc https://smthdagg.github.io/wificalling-location-gateway-feed" \
+  >> /etc/opkg/customfeeds.conf
+opkg update && opkg install wificalling-location-gateway
+```
+
+**方式 B — 手动下载**：从
+[Releases](https://github.com/smthdagg/wificalling-location-gateway/releases)
+下载对应文件，并先校验同一发布目录中的 `SHA256SUMS`。
+
+两种方式的完整说明见
+[feed 仓库](https://github.com/smthdagg/wificalling-location-gateway-feed)（含
+OpenWrt 25.x 的 `.apk` 手动安装命令）。
 
 ### 2. Redmi AX6S（单一集成 IPK）
 
