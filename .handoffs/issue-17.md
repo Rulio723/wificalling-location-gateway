@@ -66,7 +66,7 @@ Broadlands from the stub exit) instead of the real one.
   device (route rules, with first-non-direct fallback), spins up a temporary
   sing-box with a local HTTP proxy, and probes the node's real exit IP via an
   IP echo. Verified live: the auto mode now resolves the UK node exit
-  13.40.106.250 to GB/London (geo fresh), instead of the stub.
+  NODE_EXIT_IP to GB/London (geo fresh), instead of the stub.
 - **Manual/auto location switching verified on the device**: `geo.set`
   accepts a place query (geocoded online via Nominatim) or explicit
   coordinates and publishes the preset to the proxy patch target; `geo.clear`
@@ -77,7 +77,7 @@ Broadlands from the stub exit) instead of the real one.
   bound to a node and TPROXY-intercepted by the Gateway, and with Passwall
   bypassing it (`WFC_GATEWAY_BYPASS`) and no device VPN running, Apple Maps,
   Amap, and Google Maps all show the node location (UK/London) consistently;
-  web IP lookups show the sing-box node exit (13.40.106.250 AWS London); the
+  web IP lookups show the sing-box node exit (NODE_EXIT_IP, AWS London); the
   iPhone clock follows the patched timezone. Operational requirements are
   documented in AX6S_DEPLOYMENT.md (device binding, Passwall bypass, no
   Cloudflare WARP/device VPN, Safari cache clearing).
