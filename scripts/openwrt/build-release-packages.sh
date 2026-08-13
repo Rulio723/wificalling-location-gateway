@@ -174,6 +174,7 @@ build_with_sdk() {
 	docker run --rm --pull never --platform linux/amd64 --network none \
 		-v "$stage/input:/input:ro" -v "$out:/output" \
 		--entrypoint /bin/bash "$image" -ec '
+			rm -rf /builder/package/wificalling-location-gateway
 			cp -a /input/wificalling-location-gateway /builder/package/
 			printf "%s\n" "CONFIG_PACKAGE_wificalling-location-gateway=m" >> /builder/.config
 			cd /builder
