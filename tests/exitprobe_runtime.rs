@@ -62,7 +62,7 @@ fn probe_failure_is_fail_closed() {
         let node = NodeRef::new("node-1").unwrap();
         assert_eq!(
             observe_exit(&mut probe, node, 1_000, limits()),
-            Err(ExitProbeError::RuntimeFailure)
+            Err(ExitProbeError::Probe(failure))
         );
     }
 }

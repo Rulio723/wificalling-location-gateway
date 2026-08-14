@@ -194,6 +194,11 @@ var ZH = {
 	'Geo state': '定位状态',
 	'Observed at': '观测时间',
 	'Exit IP': '出口 IP',
+	'node unreachable': '节点不可达',
+	'node connection timed out': '节点连接超时',
+	'invalid probe response': '探测响应无效',
+	'node DNS resolution failed': '节点 DNS 解析失败',
+	'probe runtime failure': '探测运行失败',
 	'WLOC usage log': 'WLOC 使用日志',
 	'Records each location target update (time, place, source auto/manual). Raw WLOC responses are never recorded.':
 		'记录每次定位目标更新（时间、目标位置、来源 自动/手动）。不记录原始 WLOC 响应内容。',

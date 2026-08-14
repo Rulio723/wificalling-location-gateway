@@ -21,6 +21,20 @@ pub enum ProbeFailure {
     Timeout,
     /// The probe returned unusable or malformed data.
     InvalidData,
+    /// The probe could not resolve the node's server name (DNS failure).
+    DnsLookupFailed,
+}
+
+impl ProbeFailure {
+    /// User-facing reason, shown in the monitor when the exit IP is unknown.
+    pub fn message(self) -> &'static str {
+        match self {
+            ProbeFailure::Unreachable => "node unreachable",
+            ProbeFailure::Timeout => "node connection timed out",
+            ProbeFailure::InvalidData => "invalid probe response",
+            ProbeFailure::DnsLookupFailed => "node DNS resolution failed",
+        }
+    }
 }
 
 /// Network execution boundary for exit probing.
@@ -63,9 +77,7 @@ pub fn observe_exit(
     now_unix: u64,
     limits: ProbeLimits,
 ) -> Result<ExitObservation, ExitProbeError> {
-    let observed_ip = runtime
-        .probe_exit_ip()
-        .map_err(|_| ExitProbeError::RuntimeFailure)?;
+    let observed_ip = runtime.probe_exit_ip().map_err(ExitProbeError::Probe)?;
     let router_wan_ips = runtime
         .router_wan_ips()
         .map_err(|_| ExitProbeError::RuntimeFailure)?;

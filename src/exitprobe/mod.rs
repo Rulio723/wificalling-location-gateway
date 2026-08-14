@@ -70,6 +70,28 @@ pub enum ExitProbeError {
     ObservationFromFuture,
     StaleObservation,
     RuntimeFailure,
+    /// The exit probe itself failed; carries the classified reason.
+    Probe(crate::exitprobe::runtime::ProbeFailure),
+}
+
+impl std::fmt::Display for ExitProbeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExitProbeError::InvalidNodeRef => formatter.write_str("invalid node reference"),
+            ExitProbeError::InvalidLimits => formatter.write_str("invalid probe limits"),
+            ExitProbeError::NonPublicAddress => formatter.write_str("exit IP is not public"),
+            ExitProbeError::RouterWanUnknown => formatter.write_str("router WAN address unknown"),
+            ExitProbeError::RouterWanAddress => {
+                formatter.write_str("exit IP equals the router WAN")
+            }
+            ExitProbeError::ObservationFromFuture => {
+                formatter.write_str("observation from the future")
+            }
+            ExitProbeError::StaleObservation => formatter.write_str("stale observation"),
+            ExitProbeError::RuntimeFailure => formatter.write_str("probe runtime failure"),
+            ExitProbeError::Probe(failure) => formatter.write_str(failure.message()),
+        }
+    }
 }
 
 pub fn validate_observation(

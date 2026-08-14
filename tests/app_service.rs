@@ -237,6 +237,38 @@ fn crate_geo_result(city: &str, country: &str, tz: &str) -> ReverseGeoResult {
     }
 }
 
+#[test]
+fn probe_failure_reason_is_exposed_in_the_status_file() {
+    use wificalling_location_gateway::exitprobe::runtime::ProbeFailure;
+    let now = 1_000_000;
+    let dir = std::env::temp_dir();
+    let status_path = dir.join(format!("wloc-test-probeerr-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&status_path);
+    let mut service = build(
+        OkRuntime {
+            healthy: true,
+            install_fails: false,
+        },
+        SequenceProbe {
+            results: vec![Err(ProbeFailure::DnsLookupFailed)],
+            index: 0,
+        },
+        fresh_geo(now),
+    )
+    .with_state_files(
+        status_path.clone(),
+        dir.join("wloc-test-probeerr-events.jsonl"),
+    );
+
+    service.status().unwrap();
+    let status: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&status_path).unwrap()).unwrap();
+    assert_eq!(status["exit"]["state"], "unavailable");
+    assert_eq!(status["exit"]["ip"], serde_json::Value::Null);
+    assert_eq!(status["exit"]["last_error"], "node DNS resolution failed");
+    let _ = std::fs::remove_file(&status_path);
+}
+
 fn limits() -> ProbeLimits {
     ProbeLimits {
         max_observation_age: Duration::from_secs(60),

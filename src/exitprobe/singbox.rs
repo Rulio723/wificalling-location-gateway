@@ -299,18 +299,46 @@ impl SingBoxProbe {
             .args(["run", "-c"])
             .arg(&config_path)
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
             .spawn()
             .map_err(|_| ProbeFailure::Unreachable)?;
 
         // Give sing-box a moment to bind the probe listener, then query.
         std::thread::sleep(Duration::from_millis(800));
-        let result = query_exit_ip(self.probe_port, self.timeout);
+        let mut result = query_exit_ip(self.probe_port, self.timeout);
+
+        // Classify a failed probe from sing-box's stderr (DNS failures,
+        // timeouts, unreachable servers) so the monitor can show the reason.
+        if result.is_err() {
+            if let Some(mut stderr) = child.stderr.take() {
+                let mut text = String::new();
+                use std::io::Read;
+                let _ = stderr.read_to_string(&mut text);
+                result = Err(classify_probe_stderr(&text));
+            }
+        }
 
         let _ = child.kill();
         let _ = child.wait();
         let _ = std::fs::remove_file(&config_path);
         result
+    }
+}
+
+/// Classify a failed probe from sing-box stderr output: DNS lookup errors,
+/// connection timeouts, and everything else (unreachable).
+fn classify_probe_stderr(stderr: &str) -> ProbeFailure {
+    if stderr.contains("lookup")
+        && (stderr.contains("empty result")
+            || stderr.contains("no such host")
+            || stderr.contains("NXDOMAIN")
+            || stderr.contains("i/o timeout"))
+    {
+        ProbeFailure::DnsLookupFailed
+    } else if stderr.contains("timeout") || stderr.contains("timed out") {
+        ProbeFailure::Timeout
+    } else {
+        ProbeFailure::Unreachable
     }
 }
 
@@ -560,6 +588,30 @@ config device
         std::fs::remove_file(&config_path).unwrap();
         std::fs::remove_file(&uci_path).unwrap();
         let _ = std::fs::remove_dir_all(dir.join("wloc-singbox-bound-node-work"));
+    }
+
+    #[test]
+    fn classify_probe_stderr_distinguishes_dns_timeout_and_unreachable() {
+        assert_eq!(
+            classify_probe_stderr("lookup aws-link3.liangxin1.xyz: empty result"),
+            ProbeFailure::DnsLookupFailed
+        );
+        assert_eq!(
+            classify_probe_stderr("lookup node.example.com on 127.0.0.1:53: i/o timeout"),
+            ProbeFailure::DnsLookupFailed
+        );
+        assert_eq!(
+            classify_probe_stderr("dial tcp 1.2.3.4:443: i/o timeout"),
+            ProbeFailure::Timeout
+        );
+        assert_eq!(
+            classify_probe_stderr("dial tcp 1.2.3.4:443: connect: connection refused"),
+            ProbeFailure::Unreachable
+        );
+        assert_eq!(
+            classify_probe_stderr("random sing-box startup noise"),
+            ProbeFailure::Unreachable
+        );
     }
 
     #[test]

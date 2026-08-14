@@ -115,6 +115,9 @@ pub struct WlocService<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRun
     /// successful probe. A change means the followed device's node was
     /// switched; fresh evidence is then re-probed immediately.
     last_probe_fingerprint: Option<u64>,
+    /// Last probe failure reason (shown in the monitor when the exit IP is
+    /// unknown); cleared on a successful probe.
+    last_probe_error: Option<String>,
     /// Reverse-geocode endpoint for manual place-info lookups (production:
     /// Nominatim TLS; tests: mock port or `None` to disable).
     reverse_geo_lookup: Option<(String, u16)>,
@@ -161,6 +164,7 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> WlocService<
             manual_geo_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
             reverse_geo_lookup: config.reverse_geo_lookup,
             last_probe_fingerprint: None,
+            last_probe_error: None,
             status_file: None,
             events_file: None,
         }
@@ -205,6 +209,7 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> WlocService<
             Ok(observation) => {
                 self.exit_evidence = ExitEvidence::Verified(observation);
                 self.last_probe_fingerprint = fingerprint;
+                self.last_probe_error = None;
                 let exit_ip = self
                     .last_exit_ip()
                     .expect("fresh observation always carries an exit IP");
@@ -217,9 +222,10 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> WlocService<
                 eprintln!("wloc refresh: geo result {:?}", self.geo_resolution);
                 self.publish_patch_target();
             }
-            Err(_) => {
+            Err(error) => {
                 self.exit_evidence = ExitEvidence::Unavailable;
                 self.geo_resolution = GeoResolution::Unavailable;
+                self.last_probe_error = Some(error.to_string());
             }
         }
     }
@@ -332,6 +338,7 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> WlocService<
                 "state": serde_json::to_value(inputs.exit_state).ok(),
                 "ip": exit_ip,
                 "checked_at": inputs.exit_checked_at,
+                "last_error": self.last_probe_error,
             },
             "geo": {
                 "state": serde_json::to_value(inputs.geo_state).ok(),
