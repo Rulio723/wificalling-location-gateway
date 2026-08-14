@@ -106,9 +106,7 @@ pub fn device_bound_node_tag(uci_text: &str, device_ip: IpAddr) -> Option<String
 /// `option node 'cfg1146ab'` -> `cfg1146ab`.
 fn option_value(line: &str, keyword: &str) -> Option<String> {
     let rest = line.strip_prefix(keyword)?.trim_start();
-    let value = rest
-        .strip_prefix('\'')
-        .or_else(|| rest.strip_prefix('"'))?;
+    let value = rest.strip_prefix('\'').or_else(|| rest.strip_prefix('"'))?;
     let end = value.find(['\'', '"'])?;
     Some(value[..end].to_owned())
 }
@@ -503,8 +501,14 @@ config device
             device_bound_node_tag(uci, IpAddr::V4(Ipv4Addr::new(192, 168, 31, 175))),
             Some("node-cfg0a46ab".to_owned())
         );
-        assert_eq!(device_bound_node_tag(uci, IpAddr::V4(Ipv4Addr::new(192, 168, 31, 99))), None);
-        assert_eq!(device_bound_node_tag("", IpAddr::V4(Ipv4Addr::new(192, 168, 31, 176))), None);
+        assert_eq!(
+            device_bound_node_tag(uci, IpAddr::V4(Ipv4Addr::new(192, 168, 31, 99))),
+            None
+        );
+        assert_eq!(
+            device_bound_node_tag("", IpAddr::V4(Ipv4Addr::new(192, 168, 31, 176))),
+            None
+        );
     }
 
     #[test]
