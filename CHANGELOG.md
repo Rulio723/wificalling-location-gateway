@@ -2,6 +2,18 @@
 
 All notable changes are documented here. Versions follow Semantic Versioning.
 
+## [1.0.1] - 2026-08-14
+
+### Fixed
+
+- WLOC monitor now follows the followed device's node immediately when the
+  node is switched in the Wi-Fi Calling settings (probe-config fingerprint
+  detection instead of waiting for the 300s cache).
+- The monitor shows the probe failure reason (node DNS resolution failed /
+  connection timed out / unreachable) instead of a bare empty exit IP.
+- The exit probe no longer deadlocks on bad nodes whose sing-box output
+  never ends (kill the probe child before draining its stderr).
+
 ## [1.0.0] - 2026-08-13
 
 ### Added
@@ -28,4 +40,5 @@ All notable changes are documented here. Versions follow Semantic Versioning.
 - WLOC interception remains isolated from UDP 500/4500 and the Gateway table.
 - Invalid Geo/protocol/TLS state never produces a default fake coordinate.
 
+[1.0.1]: https://github.com/smthdagg/wificalling-location-gateway/releases/tag/v1.0.1
 [1.0.0]: https://github.com/smthdagg/wificalling-location-gateway/releases/tag/v1.0.0
