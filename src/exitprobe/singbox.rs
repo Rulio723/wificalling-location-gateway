@@ -354,6 +354,19 @@ impl ExitProbeRuntime for SingBoxProbe {
         }
         Ok(addresses)
     }
+
+    /// FNV-1a over the Gateway config bytes: a different node binding (or a
+    /// regenerated rule set) changes the fingerprint, which triggers an
+    /// immediate re-probe even while cached evidence is still fresh.
+    fn config_fingerprint(&mut self) -> Option<u64> {
+        let bytes = std::fs::read(&self.config_path).ok()?;
+        let mut hash = 0xcbf29ce484222325_u64;
+        for byte in &bytes {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        Some(hash)
+    }
 }
 
 #[allow(dead_code)]

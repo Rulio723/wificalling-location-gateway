@@ -33,6 +33,12 @@ pub trait ExitProbeRuntime {
     fn probe_exit_ip(&mut self) -> Result<IpAddr, ProbeFailure>;
     /// Report the router's verified WAN addresses (all known families).
     fn router_wan_ips(&mut self) -> Result<Vec<IpAddr>, ProbeFailure>;
+    /// Fingerprint of the probe's backing configuration (the Gateway
+    /// sing-box.json). A change means the device's node was switched, so
+    /// even fresh evidence must be re-probed. `None` disables the check.
+    fn config_fingerprint(&mut self) -> Option<u64> {
+        None
+    }
 }
 
 impl ExitProbeRuntime for Box<dyn ExitProbeRuntime> {
@@ -41,6 +47,9 @@ impl ExitProbeRuntime for Box<dyn ExitProbeRuntime> {
     }
     fn router_wan_ips(&mut self) -> Result<Vec<IpAddr>, ProbeFailure> {
         (**self).router_wan_ips()
+    }
+    fn config_fingerprint(&mut self) -> Option<u64> {
+        (**self).config_fingerprint()
     }
 }
 

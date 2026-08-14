@@ -111,6 +111,10 @@ pub struct WlocService<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRun
     /// worker thread (never the control path) writes the outcome here; the
     /// next status/refresh cycle applies it.
     manual_geo_pending: std::sync::Arc<std::sync::Mutex<Option<ManualGeoLookup>>>,
+    /// Fingerprint of the probe config (Gateway sing-box.json) at the last
+    /// successful probe. A change means the followed device's node was
+    /// switched; fresh evidence is then re-probed immediately.
+    last_probe_fingerprint: Option<u64>,
     /// Reverse-geocode endpoint for manual place-info lookups (production:
     /// Nominatim TLS; tests: mock port or `None` to disable).
     reverse_geo_lookup: Option<(String, u16)>,
@@ -156,6 +160,7 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> WlocService<
             geo_generation: 0,
             manual_geo_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
             reverse_geo_lookup: config.reverse_geo_lookup,
+            last_probe_fingerprint: None,
             status_file: None,
             events_file: None,
         }
@@ -180,13 +185,14 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> WlocService<
     /// Probe and resolve evidence when the cached observation is missing,
     /// stale, or the last probe failed.
     fn refresh_evidence_at(&mut self, now_unix: u64) {
-        let fresh_enough = matches!(
+        let fingerprint = self.probe.config_fingerprint();
+        let fresh = matches!(
             &self.exit_evidence,
             ExitEvidence::Verified(observation)
                 if now_unix.saturating_sub(observation.checked_at_unix())
                     <= self.probe_limits.max_observation_age.as_secs()
         );
-        if fresh_enough {
+        if !probe_needed(fresh, fingerprint, self.last_probe_fingerprint) {
             return;
         }
 
@@ -198,6 +204,7 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> WlocService<
         ) {
             Ok(observation) => {
                 self.exit_evidence = ExitEvidence::Verified(observation);
+                self.last_probe_fingerprint = fingerprint;
                 let exit_ip = self
                     .last_exit_ip()
                     .expect("fresh observation always carries an exit IP");
@@ -624,6 +631,17 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> ServiceDispa
     }
 }
 
+/// Whether a fresh probe is required: missing/stale evidence, a previous
+/// failure, or a changed probe configuration (the followed device's node
+/// was switched in the Gateway settings).
+fn probe_needed(
+    fresh: bool,
+    current_fingerprint: Option<u64>,
+    last_fingerprint: Option<u64>,
+) -> bool {
+    !fresh || current_fingerprint != last_fingerprint
+}
+
 /// Append one JSON line to an append-only log file (bounded to avoid
 /// unbounded growth).
 fn append_line(path: &std::path::Path, value: &serde_json::Value) {
@@ -639,5 +657,34 @@ fn append_line(path: &std::path::Path, value: &serde_json::Value) {
         .open(path)
     {
         let _ = file.write_all(line.as_bytes());
+    }
+}
+
+#[cfg(test)]
+mod probe_needed_tests {
+    use super::probe_needed;
+
+    #[test]
+    fn stale_or_missing_evidence_always_reprobes() {
+        assert!(probe_needed(false, Some(1), Some(1)));
+        assert!(probe_needed(false, None, None));
+    }
+
+    #[test]
+    fn fresh_evidence_is_kept_when_config_is_unchanged() {
+        assert!(!probe_needed(true, Some(1), Some(1)));
+        // Probes without fingerprint support (None == None) never force a
+        // re-probe on their own.
+        assert!(!probe_needed(true, None, None));
+    }
+
+    #[test]
+    fn node_switch_changes_the_fingerprint_and_forces_reprobe() {
+        // The followed device's node changed in the Gateway settings:
+        // even fresh evidence must be re-probed immediately.
+        assert!(probe_needed(true, Some(2), Some(1)));
+        // A probe that gained fingerprint support after startup also
+        // re-probes once.
+        assert!(probe_needed(true, Some(1), None));
     }
 }
