@@ -309,6 +309,10 @@ impl SingBoxProbe {
 
         // Classify a failed probe from sing-box's stderr (DNS failures,
         // timeouts, unreachable servers) so the monitor can show the reason.
+        // Kill the child first: reading its stderr to EOF while it is still
+        // running would block forever.
+        let _ = child.kill();
+        let _ = child.wait();
         if result.is_err() {
             if let Some(mut stderr) = child.stderr.take() {
                 let mut text = String::new();
@@ -317,9 +321,6 @@ impl SingBoxProbe {
                 result = Err(classify_probe_stderr(&text));
             }
         }
-
-        let _ = child.kill();
-        let _ = child.wait();
         let _ = std::fs::remove_file(&config_path);
         result
     }
@@ -588,6 +589,48 @@ config device
         std::fs::remove_file(&config_path).unwrap();
         std::fs::remove_file(&uci_path).unwrap();
         let _ = std::fs::remove_dir_all(dir.join("wloc-singbox-bound-node-work"));
+    }
+
+    #[test]
+    fn probe_does_not_hang_when_singbox_stderr_stays_open() {
+        use std::time::Instant;
+        // A probe child that keeps writing to stderr but never exits must
+        // not block the caller: the child is killed before its stderr is
+        // drained (regression: read_to_string before kill deadlocked).
+        let dir = std::env::temp_dir();
+        let fake_bin = dir.join("wloc-fake-singbox.sh");
+        std::fs::write(
+            &fake_bin,
+            "#!/bin/sh\nwhile true; do echo 'lookup bad-node.invalid: empty result' >&2; sleep 1; done\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&fake_bin).unwrap().permissions();
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fake_bin, perms).unwrap();
+
+        let config_path = dir.join("wloc-singbox-hang.json");
+        std::fs::write(&config_path, sample_document().to_string()).unwrap();
+        let mut probe = SingBoxProbe::new(
+            config_path.clone(),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 31, 175)),
+            18_081,
+            dir.join("wloc-singbox-hang-work"),
+        );
+        probe.timeout = Duration::from_millis(300);
+        probe.singbox_bin = fake_bin.to_string_lossy().into_owned();
+
+        let started = Instant::now();
+        let result = probe.probe_exit_ip();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProbeFailure::DnsLookupFailed);
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "probe must return promptly, not hang on a live stderr pipe"
+        );
+        std::fs::remove_file(&config_path).unwrap();
+        std::fs::remove_file(&fake_bin).unwrap();
+        let _ = std::fs::remove_dir_all(dir.join("wloc-singbox-hang-work"));
     }
 
     #[test]
