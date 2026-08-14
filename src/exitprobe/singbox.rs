@@ -55,6 +55,64 @@ pub fn select_outbound_tag(document: &Value, device_ip: IpAddr) -> Option<String
     })
 }
 
+/// Resolve the node bound to `device_ip` in the Gateway device-policy UCI
+/// text (`/etc/config/wificalling-gateway`), returning its `node-<section>`
+/// tag. Disabled policies are included: the follow-device IP is defined by
+/// the bound node, not by whether Wi-Fi Calling interception is enabled.
+pub fn device_bound_node_tag(uci_text: &str, device_ip: IpAddr) -> Option<String> {
+    let mut in_device = false;
+    let mut source_ips: Vec<String> = Vec::new();
+    let mut node: Option<String> = None;
+    for raw_line in uci_text.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with("config ") {
+            // Flush the previous device section before starting a new one
+            // (the next `config device` must not swallow it).
+            if in_device
+                && source_ips
+                    .iter()
+                    .any(|ip| ip.parse::<IpAddr>().ok() == Some(device_ip))
+            {
+                return node.map(|section| format!("node-{section}"));
+            }
+            in_device = line.starts_with("config device");
+            source_ips.clear();
+            node = None;
+            continue;
+        }
+        if !in_device {
+            continue;
+        }
+        if let Some(value) = option_value(line, "option node") {
+            node = Some(value);
+        } else if let Some(value) = option_value(line, "list source_ip") {
+            source_ips.push(value);
+        }
+    }
+    if in_device
+        && source_ips
+            .iter()
+            .any(|ip| ip.parse::<IpAddr>().ok() == Some(device_ip))
+    {
+        return node.map(|section| format!("node-{section}"));
+    }
+    None
+}
+
+/// Extract the quoted value of a UCI `option`/`list` line, e.g.
+/// `option node 'cfg1146ab'` -> `cfg1146ab`.
+fn option_value(line: &str, keyword: &str) -> Option<String> {
+    let rest = line.strip_prefix(keyword)?.trim_start();
+    let value = rest
+        .strip_prefix('\'')
+        .or_else(|| rest.strip_prefix('"'))?;
+    let end = value.find(['\'', '"'])?;
+    Some(value[..end].to_owned())
+}
+
 /// Parse a sing-box.json document, retaining outbounds for reuse.
 pub fn parse_singbox_config(document: &Value) -> SingBoxConfig {
     let outbounds = document
@@ -169,6 +227,10 @@ pub struct SingBoxProbe {
     work_dir: PathBuf,
     timeout: Duration,
     singbox_bin: String,
+    /// Gateway device-policy UCI file (test-injectable). Used to resolve
+    /// the bound node for devices that have no route rule (e.g. disabled
+    /// Wi-Fi Calling policies), so follow-device still probes their node.
+    uci_config_path: PathBuf,
 }
 
 impl SingBoxProbe {
@@ -185,6 +247,7 @@ impl SingBoxProbe {
             work_dir,
             timeout: Duration::from_secs(15),
             singbox_bin: "/usr/bin/sing-box".to_owned(),
+            uci_config_path: PathBuf::from("/etc/config/wificalling-gateway"),
         }
     }
 
@@ -195,14 +258,25 @@ impl SingBoxProbe {
         let document: Value = serde_json::from_str(&text).map_err(|_| ProbeFailure::InvalidData)?;
         let config = parse_singbox_config(&document);
 
-        // Choose the outbound the Gateway's route rules bind to the assigned
-        // device; fall back to the first non-direct outbound otherwise.
+        // 1. The outbound the Gateway's route rules bind to the assigned
+        //    device (enabled policies).
         let rule_tag = select_outbound_tag(&document, self.device_ip);
         if let Some(tag) = rule_tag {
             if config.outbounds.iter().any(|o| o.tag == tag) {
                 return Ok(tag);
             }
         }
+        // 2. The node bound to the device policy, even when the policy is
+        //    disabled and has no route rule - follow-device must report that
+        //    node's exit.
+        if let Ok(uci_text) = std::fs::read_to_string(&self.uci_config_path) {
+            if let Some(tag) = device_bound_node_tag(&uci_text, self.device_ip) {
+                if config.outbounds.iter().any(|o| o.tag == tag) {
+                    return Ok(tag);
+                }
+            }
+        }
+        // 3. Fall back to the first non-direct outbound.
         config
             .outbounds
             .iter()
@@ -397,6 +471,78 @@ mod tests {
         assert!(ips.contains(&IpAddr::V4(Ipv4Addr::new(192, 168, 31, 1))));
         assert!(ips.contains(&IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5))));
         assert!(!ips.contains(&IpAddr::V4(Ipv4Addr::LOCALHOST)));
+    }
+
+    #[test]
+    fn device_bound_node_tag_parses_the_device_policy() {
+        // The iPhone17 policy is disabled (enabled=0) so it has no route
+        // rule, but its bound node must still be probeable - the follow-
+        // device IP comes from that node's exit.
+        let uci = r#"
+config wificalling-gateway 'main'
+	option enabled '1'
+
+config device
+	option label 'iPhone12'
+	option route_mode 'independent'
+	option node 'cfg0a46ab'
+	list source_ip '192.168.31.175'
+
+config device
+	option label 'iPhone17'
+	option route_mode 'independent'
+	option node 'cfg1146ab'
+	option enabled '0'
+	list source_ip '192.168.31.176'
+"#;
+        assert_eq!(
+            device_bound_node_tag(uci, IpAddr::V4(Ipv4Addr::new(192, 168, 31, 176))),
+            Some("node-cfg1146ab".to_owned())
+        );
+        assert_eq!(
+            device_bound_node_tag(uci, IpAddr::V4(Ipv4Addr::new(192, 168, 31, 175))),
+            Some("node-cfg0a46ab".to_owned())
+        );
+        assert_eq!(device_bound_node_tag(uci, IpAddr::V4(Ipv4Addr::new(192, 168, 31, 99))), None);
+        assert_eq!(device_bound_node_tag("", IpAddr::V4(Ipv4Addr::new(192, 168, 31, 176))), None);
+    }
+
+    #[test]
+    fn load_outbound_tag_prefers_device_bound_node_over_fallback() {
+        // No route rule for the device, but the device policy binds a node
+        // that exists in the sing-box outbounds: probe must use it, not the
+        // arbitrary first outbound.
+        let doc = json!({"outbounds": [
+            {"type": "hysteria2", "tag": "node-a"},
+            {"type": "vless", "tag": "node-cfg1146ab"},
+            {"type": "direct", "tag": "direct"}
+        ]});
+        let dir = std::env::temp_dir();
+        let config_path = dir.join("wloc-singbox-bound-node.json");
+        let uci_path = dir.join("wloc-singbox-bound-node.uci");
+        std::fs::write(&config_path, doc.to_string()).unwrap();
+        std::fs::write(
+            &uci_path,
+            "config device
+\toption label 'iPhone17'
+\toption node 'cfg1146ab'
+\tlist source_ip '192.168.31.176'
+",
+        )
+        .unwrap();
+        let mut probe = SingBoxProbe::new(
+            config_path.clone(),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 31, 176)),
+            18080,
+            dir.join("wloc-singbox-bound-node-work"),
+        );
+        probe.uci_config_path = uci_path.clone();
+        // load_outbound_tag must select the bound node tag; the sing-box
+        // spawn then fails on this host, which is fine.
+        let _ = probe.probe_exit_ip();
+        std::fs::remove_file(&config_path).unwrap();
+        std::fs::remove_file(&uci_path).unwrap();
+        let _ = std::fs::remove_dir_all(dir.join("wloc-singbox-bound-node-work"));
     }
 
     #[test]
