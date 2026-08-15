@@ -29,7 +29,8 @@ var CONTENT = {
 			'节点导入链接仅在本浏览器中本地解析，不会发送到任何外部服务。',
 			'设备策略中的节点需先保存节点后，刷新页面才能选择。',
 			'活动日志只记录握手结果与持续加密流量等元数据；隧道内容全程加密，通话/短信无法区分，号码与消息内容不可见。',
-			'若手机显示「未检测到」，请检查节点连通性、设备策略绑定与 iPhone 的 Wi-Fi 通话开关。'
+			'若手机显示「未检测到」，请检查节点连通性、设备策略绑定与 iPhone 的 Wi-Fi 通话开关。',
+			'旁路由（自身不提供 DHCP）同样可用：设备是否在线通过 ARP 邻居表识别，无需 DHCP 租约；请把设备的网关指向旁路由 IP。'
 		],
 		wlocStepsTitle: 'WLOC 定位 · 使用步骤',
 		wlocSteps: [
@@ -47,7 +48,8 @@ var CONTENT = {
 			'自动模式跟随节点出口 IP 的地理位置；手动模式的 GPS 只保存在路由器本地，不会外传。',
 			'定位请求由 iPhone 的应用（地图、天气等）触发；若地图未刷新，请重新触发定位或稍等片刻。',
 			'WLOC 使用日志最多显示最近 20 条，可一键清空；日志仅记录替换元数据，不记录原始 WLOC 响应内容。',
-			'配置（开关、模式、手动坐标、预设）保存在 /etc/config/wloc-service，重启后仍然生效。'
+			'配置（开关、模式、手动坐标、预设）保存在 /etc/config/wloc-service，重启后仍然生效。',
+			'「服务状态」页（服务 → 服务状态）集中显示 wloc-service 与 Wi-Fi 通话网关的进程、配置、规则、补丁与节点健康，每 10 秒自动刷新；异常项以红点标出。'
 		]
 	},
 	en: {
@@ -68,7 +70,8 @@ var CONTENT = {
 			'Node import links are parsed locally in this browser and are never sent to any external service.',
 			'Save a node first, then reload the page, before you can select it for a device policy.',
 			'The activity log only records handshake results and sustained encrypted traffic. Tunnel content is fully encrypted: calls are inferred from sustained bidirectional traffic, SMS cannot be distinguished, and phone numbers or message content are never visible.',
-			'If the phone shows "Not detected", check node connectivity, the device policy binding and the iPhone Wi-Fi Calling switch.'
+			'If the phone shows "Not detected", check node connectivity, the device policy binding and the iPhone Wi-Fi Calling switch.',
+			'A secondary router without DHCP works too: device liveness is detected via the ARP cache, so no DHCP lease is required; just point the device gateway to the secondary router\'s IP.'
 		],
 		wlocStepsTitle: 'WLOC Location · Usage steps',
 		wlocSteps: [
@@ -86,7 +89,8 @@ var CONTENT = {
 			'Auto mode follows the location of the node exit IP; manual GPS stays local to the router and is never sent out.',
 			'Location requests are triggered by iPhone apps (Maps, Weather, etc.). If maps do not refresh, re-trigger location and wait a moment.',
 			'The WLOC usage log keeps the newest 20 entries and can be cleared with one click; it only records replacement metadata, never raw WLOC responses.',
-			'Settings (switch, mode, manual coordinates, presets) are stored in /etc/config/wloc-service and survive reboots.'
+			'Settings (switch, mode, manual coordinates, presets) are stored in /etc/config/wloc-service and survive reboots.',
+			'"Service Status" (Services > Service Status) shows both services in one place: daemon processes, config validity, nftables rules, build patches and node health, refreshed every 10 seconds; anything unhealthy is marked with a red dot.'
 		]
 	}
 };

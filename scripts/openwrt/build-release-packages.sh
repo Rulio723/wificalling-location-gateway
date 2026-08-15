@@ -5,7 +5,7 @@ OPENWRT_24_SDK='ghcr.io/openwrt/sdk:x86_64-24.10.8@sha256:b28d5e4087dbd3f815a8bf
 OPENWRT_25_SDK='ghcr.io/openwrt/sdk:x86_64-25.12.3@sha256:a0ab488698b70d6585dc35bebb77b3f6d9523fd68873fab78a1bd19cc123cd0f'
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
-version=1.0.3
+version=1.0.10
 release=1
 arch=x86_64
 service_bin=
@@ -25,7 +25,7 @@ usage() {
 Usage: build-release-packages.sh [--plan] [options]
 
 Options:
-  --version VERSION          Package version (default: 1.0.3)
+  --version VERSION          Package version (default: 1.0.10)
   --release RELEASE          Package release number (default: 1)
   --arch ARCH                OpenWrt runtime architecture (default: x86_64)
   --service-bin PATH         Static wloc-service binary (required)
@@ -109,6 +109,8 @@ tar -xzf "$stage/gateway/data.tar.gz" -C "$package_dir/files"
 # patch adds it (fail-closed against future Gateway versions).
 "$repo_root/scripts/openwrt/patch-wireguard-psk.sh" "$package_dir/files"
 "$repo_root/scripts/openwrt/patch-wireguard-health.sh" "$package_dir/files"
+"$repo_root/scripts/openwrt/patch-node-status-compact.sh" "$package_dir/files"
+"$repo_root/scripts/openwrt/patch-gateway-device-guard.sh" "$package_dir/files"
 
 # Overlay the integrated UI, then the architecture-specific WLOC runtime.
 cp -R "$repo_root/openwrt/luci-app-wificalling-location-gateway/files/." "$package_dir/files/"
@@ -118,7 +120,7 @@ cp "$service_bin" "$package_dir/files/usr/sbin/wloc-service"
 cp "$ctl_bin" "$package_dir/files/usr/sbin/wloc-ctl"
 cp "$repo_root/openwrt/files/etc/init.d/wloc-service" "$package_dir/files/etc/init.d/wloc-service"
 cp "$repo_root/openwrt/files/etc/config/wloc-service" "$package_dir/files/etc/config/wloc-service"
-for helper in export-mobileconfig.sh wloc-redirect-sync.sh wloc-refresh-set.sh; do
+for helper in export-mobileconfig.sh wloc-redirect-sync.sh wloc-refresh-set.sh wloc-health.sh; do
 	cp "$repo_root/openwrt/files/usr/sbin/$helper" "$package_dir/files/usr/sbin/$helper"
 done
 chmod 0755 "$package_dir/files/usr/sbin/"* "$package_dir/files/etc/init.d/"*

@@ -2,7 +2,7 @@
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
-version=${1:-1.0.3-1}
+version=${1:-1.0.10-1}
 dependency_mode=${2:-production}
 package=luci-app-wificalling-location-gateway
 source_dir="$root/openwrt/$package/files"
@@ -99,6 +99,8 @@ case "$dependency_mode" in
 			# Gateway versions).
 			"$root/scripts/openwrt/patch-wireguard-psk.sh" "$gateway_stage/data"
 			"$root/scripts/openwrt/patch-wireguard-health.sh" "$gateway_stage/data"
+			"$root/scripts/openwrt/patch-node-status-compact.sh" "$gateway_stage/data"
+			"$root/scripts/openwrt/patch-gateway-device-guard.sh" "$gateway_stage/data"
 			cp -R "$gateway_stage/data/." "$stage/data/"
 			# The integrated LuCI views intentionally replace the standalone
 			# Gateway views after the verified Gateway payload is merged.
@@ -116,6 +118,7 @@ case "$dependency_mode" in
 		monitor_name="wloc_monitor_fix_$view_suffix"
 		faq_name="wloc_faq_fix_$view_suffix"
 		wfc_name="wfc_overview_fix_$view_suffix"
+		health_name="wloc_health_fix_$view_suffix"
 		# Versioned view names bust the browser's resource cache: the LuCI
 		# menu loads a fresh URL per package version, so an updated settings,
 		# monitor, FAQ, or overview page is picked up without a manual cache
@@ -128,7 +131,9 @@ case "$dependency_mode" in
 			"$stage/data/www/luci-static/resources/view/wificalling-location-gateway/$faq_name.js"
 		cp "$stage/data/www/luci-static/resources/view/wificalling-gateway/overview.js" \
 			"$stage/data/www/luci-static/resources/view/wificalling-gateway/$wfc_name.js"
-		python3 - "$stage/data/usr/share/luci/menu.d/luci-app-wificalling-location-gateway.json" "$view_name" "$monitor_name" "$faq_name" "$wfc_name" <<'PY'
+		cp "$stage/data/www/luci-static/resources/view/wificalling-location-gateway/wloc-health.js" \
+			"$stage/data/www/luci-static/resources/view/wificalling-location-gateway/$health_name.js"
+		python3 - "$stage/data/usr/share/luci/menu.d/luci-app-wificalling-location-gateway.json" "$view_name" "$monitor_name" "$faq_name" "$wfc_name" "$health_name" <<'PY'
 import json
 import sys
 
@@ -137,6 +142,7 @@ view_name = sys.argv[2]
 monitor_name = sys.argv[3]
 faq_name = sys.argv[4]
 wfc_name = sys.argv[5]
+health_name = sys.argv[6]
 with open(path, encoding="utf-8") as handle:
     menu = json.load(handle)
 menu["admin/services/wificalling-location-gateway/wloc"]["action"]["path"] = (
@@ -150,6 +156,9 @@ menu["admin/services/wificalling-location-gateway/faq"]["action"]["path"] = (
 )
 menu["admin/services/wificalling-location-gateway/wfc"]["action"]["path"] = (
     f"wificalling-gateway/{wfc_name}"
+)
+menu["admin/services/wificalling-location-gateway/health"]["action"]["path"] = (
+    f"wificalling-location-gateway/{health_name}"
 )
 with open(path, "w", encoding="utf-8") as handle:
     json.dump(menu, handle, ensure_ascii=False, indent=2)
@@ -165,6 +174,7 @@ PY
 			cp "$root/openwrt/files/etc/init.d/wloc-service" "$stage/data/etc/init.d/wloc-service"
 			cp "$root/openwrt/files/usr/sbin/wloc-redirect-sync.sh" "$stage/data/usr/sbin/wloc-redirect-sync.sh"
 			cp "$root/openwrt/files/usr/sbin/wloc-refresh-set.sh" "$stage/data/usr/sbin/wloc-refresh-set.sh"
+			cp "$root/openwrt/files/usr/sbin/wloc-health.sh" "$stage/data/usr/sbin/wloc-health.sh"
 			cp "$service_bin" "$stage/data/usr/sbin/wloc-service"
 			cp "$ctl_bin" "$stage/data/usr/sbin/wloc-ctl"
 			chmod 0755 "$stage/data/etc/init.d/wloc-service" "$stage/data/usr/sbin/"*

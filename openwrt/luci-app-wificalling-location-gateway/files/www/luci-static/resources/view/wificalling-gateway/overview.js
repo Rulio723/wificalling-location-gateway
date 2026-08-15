@@ -11,8 +11,11 @@
 
 return view.extend({
 	load: function() {
+		// The node status file is exported under the uhttpd docroot and
+		// read with a plain GET: the /ubus JSON-RPC channel truncates
+		// larger replies on some firmwares, leaving the status blank.
 		return Promise.all([
-			L.resolveDefault(fs.read('/var/run/wificalling-gateway/node-status.json'), '{}'),
+			L.resolveDefault(fetch('/wloc-node-status.json').then(function(r) { return r.text(); }), '{}'),
 			uci.load('wificalling-gateway'),
 			L.resolveDefault(fs.read('/tmp/dhcp.leases'), ''),
 			uci.load('dhcp'),
@@ -33,10 +36,12 @@ return view.extend({
 			if (n.state === 'handshake_ok') return wlocI18n.t('Good');
 			if (n.state === 'handshake_failed') return wlocI18n.t('Offline');
 			if (n.state === 'unreachable') return wlocI18n.t('Offline');
-			if (n.ping_ms == null) return wlocI18n.t('Unknown');
-			if (n.ping_ms <= 100) return wlocI18n.t('Excellent');
-			if (n.ping_ms <= 200) return wlocI18n.t('Good');
-			if (n.ping_ms <= 300) return wlocI18n.t('Fair');
+			// ping_ms may arrive as a JSON number or a quoted string.
+			var ms = parseFloat(n.ping_ms);
+			if (isNaN(ms)) return wlocI18n.t('Unknown');
+			if (ms <= 100) return wlocI18n.t('Excellent');
+			if (ms <= 200) return wlocI18n.t('Good');
+			if (ms <= 300) return wlocI18n.t('Fair');
 			return wlocI18n.t('Poor');
 		}
 		function nodeState(n) {
@@ -86,6 +91,11 @@ return view.extend({
 			if (host && host.mac && mac && host.mac.toLowerCase() === mac.toLowerCase()) return wlocI18n.t('Bound');
 			if (host && host.mac && mac) return wlocI18n.t('MAC changed, rebind on reconnect');
 			if (mac) return wlocI18n.t('Not bound yet');
+			// No DHCP lease (static IP, or a router that does not run DHCP
+			// at all, e.g. a secondary/AP router): the ARP cache is the only
+			// liveness source, so a recently-seen device is online, not
+			// offline. Only report offline when neither source knows it.
+			if (arpDevices[ip]) return wlocI18n.t('Online (static IP)');
 			return wlocI18n.t('Device offline');
 		}
 
@@ -341,7 +351,7 @@ return view.extend({
 				};
 
 		poll.add(function() {
-			return L.resolveDefault(fs.read('/var/run/wificalling-gateway/node-status.json'), '{}').then(function(raw) {
+			return L.resolveDefault(fetch('/wloc-node-status.json').then(function(r) { return r.text(); }), '{}').then(function(raw) {
 				var current; try { current = JSON.parse(raw); } catch (e) { current = { nodes: [] }; }
 				(current.nodes || []).forEach(function(n) {
 					[['state', nodeState(n)], ['ping', latency(n)], ['quality', quality(n)]].forEach(function(v) {
