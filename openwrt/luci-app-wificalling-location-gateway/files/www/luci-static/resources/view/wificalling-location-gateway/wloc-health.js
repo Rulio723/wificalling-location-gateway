@@ -4,15 +4,30 @@
 'require poll';
 'require dom';
 'require rpc';
+'require ui';
 
-// 服务状态与日志（合并页）：wloc-service 与 Wi-Fi Calling Gateway
-// （monitor-loop + sing-box）的进程、配置、规则、补丁、节点健康与最近日志。
+// 服务状态页：wloc-service 与 Wi-Fi Calling Gateway（monitor-loop +
+// sing-box）的进程、配置、规则、补丁、节点健康，以及两个服务的重启按钮。
 // 数据由 /usr/sbin/wloc-health.sh 通过 luci.wloc rpcd `health` 方法提供。
 
 var getHealth = rpc.declare({
 	object: 'luci.wloc',
 	method: 'health'
 });
+
+var restartWloc = rpc.declare({
+	object: 'luci.wloc',
+	method: 'restart_service'
+});
+
+var restartGateway = rpc.declare({
+	object: 'luci.wloc',
+	method: 'restart_gateway'
+});
+
+function notify(title, message, kind) {
+	ui.addNotification(null, E('p', [ E('strong', title + ': '), message ]), kind);
+}
 
 // Compact status: a small colored dot plus short text.
 function statusDot(ok, text) {
@@ -70,7 +85,11 @@ return view.extend({
 			row(gwBody, wlocI18n.t('Monitor'), statusDot(!!g.running, g.running ? wlocI18n.t('Running') : wlocI18n.t('Stopped')));
 			row(gwBody, wlocI18n.t('sing-box'), statusDot(!!g.singbox, g.singbox ? wlocI18n.t('Running') : wlocI18n.t('Stopped')));
 			row(gwBody, wlocI18n.t('Proxy config'), statusDot(!!g.config_valid, g.config_valid ? wlocI18n.t('Valid') : wlocI18n.t('Invalid')));
-			row(gwBody, wlocI18n.t('Config age'), ageText(g.config_age));
+			row(gwBody, wlocI18n.t('Proxy config age'), ageText(g.config_age));
+			if (g.config_stale) {
+				row(gwBody, wlocI18n.t('Config changed'), E('span', { style: 'color:#d97706' },
+					wlocI18n.t('Nodes/devices changed - restart the gateway to apply')));
+			}
 			row(gwBody, wlocI18n.t('nftables'), g.nft_rules + ' ' + wlocI18n.t('rules'));
 			row(gwBody, wlocI18n.t('Devices'), g.devices + ' ' + wlocI18n.t('policies'));
 
@@ -110,19 +129,69 @@ return view.extend({
 			});
 		}, 10);
 
+		// One-click service restarts, then refresh the report immediately.
+		function restartAction(call, okText, busyLabel) {
+			return function() {
+				if (this.disabled) return;
+				this.disabled = true;
+				var original = this.textContent;
+				this.textContent = busyLabel;
+				call().then(function(r) {
+					this.disabled = false;
+					this.textContent = original;
+					if (r && r.error) {
+						notify(wlocI18n.t('Restart failed'), r.error, 'error');
+						return;
+					}
+					notify(wlocI18n.t('Restarted'), okText, 'info');
+					return L.resolveDefault(getHealth(), { error: wlocI18n.t('Health check unavailable') }).then(function(h) {
+						renderHealth(h);
+					});
+				}.bind(this)).catch(function(e) {
+					this.disabled = false;
+					this.textContent = original;
+					notify(wlocI18n.t('Restart failed'), String(e), 'error');
+				}.bind(this));
+			};
+		}
+
+		var restartButtons = E('div', { 'class': 'cbi-section', style: 'margin-top:16px' }, [
+			E('h3', { style: 'margin-top:0' }, wlocI18n.t('Restart services')),
+			E('div', {}, [
+				E('button', {
+					'class': 'cbi-button cbi-button-apply',
+					'id': 'wloc-restart-gateway',
+					style: 'margin-right:8px',
+					click: restartAction(restartGateway,
+						wlocI18n.t('Gateway restarted - proxy was briefly interrupted'),
+						wlocI18n.t('Restarting…'))
+				}, wlocI18n.t('Restart Wi-Fi Calling gateway')),
+				E('button', {
+					'class': 'cbi-button cbi-button-apply',
+					'id': 'wloc-restart-wloc',
+					click: restartAction(restartWloc,
+						wlocI18n.t('WLOC service restarted'),
+						wlocI18n.t('Restarting…'))
+				}, wlocI18n.t('Restart WLOC service'))
+			]),
+			E('p', { style: 'color:#666;font-size:12px;margin-bottom:0' },
+				wlocI18n.t('Restarting the gateway regenerates the proxy config and briefly interrupts device proxying.'))
+		]);
+
 		return E([], [
+			E('div', { 'class': 'cbi-section', style: 'margin-bottom:12px' }, [
+				E('h3', { style: 'margin-top:0' }, wlocI18n.t('Gateway')),
+				gwBody
+			]),
 			E('div', { 'class': 'cbi-section', style: 'margin-bottom:12px' }, [
 				E('h3', { style: 'margin-top:0' }, wlocI18n.t('WLOC service')),
 				wlocBody
 			]),
 			E('div', { 'class': 'cbi-section', style: 'margin-bottom:12px' }, [
-				E('h3', { style: 'margin-top:0' }, wlocI18n.t('Gateway')),
-				gwBody
-			]),
-			E('div', { 'class': 'cbi-section' }, [
 				E('h3', { style: 'margin-top:0' }, wlocI18n.t('Patches and nodes')),
 				extraBody
-			])
+			]),
+			restartButtons
 		]);
 	}
 });
@@ -133,6 +202,5 @@ function yesNo(v) {
 
 function ageText(seconds) {
 	if (seconds == null || seconds < 0) return '-';
-	if (seconds <= 120) return wlocI18n.t('Fresh');
-	return wlocI18n.t('Stale (%d s)').format(seconds);
+	return wlocI18n.t('generated %d s ago').format(seconds);
 }
