@@ -190,6 +190,12 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> WlocService<
     /// Probe and resolve evidence when the cached observation is missing,
     /// stale, or the last probe failed.
     fn refresh_evidence_at(&mut self, now_unix: u64) {
+        // Manual mode pins the location to the preset coordinates; exit
+        // probing exists only to drive auto-follow, so it is skipped
+        // entirely in manual mode (no reverse probe, no misleading IP).
+        if matches!(self.geo_source, GeoSource::Manual { .. }) {
+            return;
+        }
         let fingerprint = self.probe.config_fingerprint();
         let fresh = matches!(
             &self.exit_evidence,
@@ -317,7 +323,12 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> WlocService<
                 _ => (None, None, None, None, None),
             },
         };
-        let exit_ip = self.last_exit_ip().map(|ip| ip.to_string());
+        // In manual mode the exit IP is not meaningful (no probing runs);
+        // only auto-follow reports the observed exit.
+        let exit_ip = match self.geo_source {
+            GeoSource::Manual { .. } => None,
+            GeoSource::Auto => self.last_exit_ip().map(|ip| ip.to_string()),
+        };
         let status = serde_json::json!({
             "generation": inputs.generation,
             "observed_at": inputs.observed_at_unix,
@@ -519,17 +530,26 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> WlocService<
 
     /// Build the status snapshot inputs from the current evidence at `now_unix`.
     pub fn status_inputs_at(&self, now_unix: u64) -> StatusInputs {
-        let (exit_state, exit_checked_at) = match &self.exit_evidence {
-            ExitEvidence::Verified(observation) => {
-                (ExitState::Verified, Some(observation.checked_at_unix()))
-            }
-            ExitEvidence::Unavailable => (ExitState::Unavailable, None),
-            ExitEvidence::None => (ExitState::Unknown, None),
+        let (exit_state, exit_checked_at) = match &self.geo_source {
+            // Manual mode: exit probing is skipped by design; report the
+            // healthy "manual" state instead of unknown/unavailable.
+            GeoSource::Manual { .. } => (ExitState::Manual, None),
+            GeoSource::Auto => match &self.exit_evidence {
+                ExitEvidence::Verified(observation) => {
+                    (ExitState::Verified, Some(observation.checked_at_unix()))
+                }
+                ExitEvidence::Unavailable => (ExitState::Unavailable, None),
+                ExitEvidence::None => (ExitState::Unknown, None),
+            },
         };
-        let (geo_state, geo_expires_at) = match &self.geo_resolution {
-            GeoResolution::Fresh(record) => (GeoState::Fresh, Some(record.expires_at_unix)),
-            GeoResolution::Uncertain => (GeoState::Uncertain, None),
-            GeoResolution::Unavailable => (GeoState::Unavailable, None),
+        let (geo_state, geo_expires_at) = match &self.geo_source {
+            // Manual mode: the manual preset is the source of truth.
+            GeoSource::Manual { .. } => (GeoState::Manual, None),
+            GeoSource::Auto => match &self.geo_resolution {
+                GeoResolution::Fresh(record) => (GeoState::Fresh, Some(record.expires_at_unix)),
+                GeoResolution::Uncertain => (GeoState::Uncertain, None),
+                GeoResolution::Unavailable => (GeoState::Unavailable, None),
+            },
         };
         let (engine_health, engine_uptime) = match self.state.phase() {
             ServicePhase::Intercepting => (EngineHealth::Healthy, 0),

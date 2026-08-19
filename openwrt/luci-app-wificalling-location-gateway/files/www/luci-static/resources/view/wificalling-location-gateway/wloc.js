@@ -103,8 +103,15 @@ return view.extend({
 		try { proxyHealth = JSON.parse(data[5] || '{}'); } catch (e) { proxyHealth = {}; }
 		var regen = data[6] || {};
 		var deviceList = uci.sections('wificalling-gateway', 'device').map(function(d) {
-			return { ip: d.source_ip, label: d.label || d.source_ip };
-		}).filter(function(d) { return d.ip; });
+			// source_ip is a DynamicList value (array) on the device policy.
+			var raw = d.source_ip;
+			var ip = Array.isArray(raw) ? (raw[0] || '') : (raw || '');
+			// Only enabled devices can be followed: their bound node is the
+			// one compiled into sing-box.json and probed for the exit IP. A
+			// disabled device's node is filtered out, so following it would
+			// silently probe a fallback node - never offer it here.
+			return { ip: ip, label: d.label || ip, enabled: d.enabled !== '0' };
+		}).filter(function(d) { return d.ip && d.enabled; });
 
 		var m = new form.Map('wloc-service', wlocI18n.t('WLOC Settings'),
 			wlocI18n.t('WLOC location interception: spoofs the Apple WLOC response so the test device reports the gateway-chosen location. GPS values stay on this router.'));
@@ -154,7 +161,11 @@ return view.extend({
 					notify(wlocI18n.t('Mode switch failed'), response.error);
 					return false;
 				}
-				uci.set('wloc-service', 'main', 'geo_source', value);
+				// The backend mode-set already persisted geo_source (and the
+				// manual coordinates) via uci commit; the browser must not
+				// start its own UCI save/apply, which would race the form and
+				// could carry a stale pending geo_source over on a later
+				// Follow-device save.
 				return true;
 			}).catch(function(e) {
 				notify(wlocI18n.t('Mode switch failed'), String(e));

@@ -60,23 +60,28 @@ END {
   if (nn<1) fail("at least one enabled node is required")
   if (level=="") level="warn"
   if (wg_style=="") wg_style="legacy"
+  n_wg_used=0
+  for(k1=1;k1<=nw;k1++) { split(node[wg_nodes[k1]],f1,"|"); if (used[f1[2]]) n_wg_used++ }
   print "{"
   # The wireguard outbound was removed in sing-box 1.13.0 (deprecated in
   # 1.11.0, gated behind ENABLE_DEPRECATED_WIREGUARD_OUTBOUND on 1.11/1.12);
   # the wireguard endpoint works from 1.11.0 on.  init.d picks the style from
   # the installed sing-box version; "endpoint" emits an endpoints block and
   # routes straight to the endpoint tag, "legacy" keeps the old outbound.
-  if (nw>0 && wg_style=="endpoint") {
+  if (nw>0 && n_wg_used>0 && wg_style=="endpoint") {
     print "  \"endpoints\":["
+    w_out=0
     for(w=1;w<=nw;w++) {
       split(node[wg_nodes[w]],f,"|"); id=f[2]
+      if (!used[id]) continue
+      w_out++
       s="{\"type\":\"wireguard\",\"tag\":" q("wg-" id) ",\"address\":[" q(f[22]) "],\"private_key\":" q(f[21])
       s=s ",\"peers\":[{\"address\":" q(f[4]) ",\"port\":" f[5] ",\"public_key\":" q(f[13]) ",\"allowed_ips\":[\"0.0.0.0/0\"]"
       if (f[25]!="") s=s ",\"pre_shared_key\":" q(f[25])
       if (f[23]!="") { nr=split(f[23],rv,","); rv_s=rv[1]; for(ri=2;ri<=nr;ri++) rv_s=rv_s "," rv[ri]; s=s ",\"reserved\":[" rv_s "]" }
       s=s "}]"
       if (f[24]!="") s=s ",\"mtu\":" f[24]
-      s=s "}"; print "    " s (w<nw?",":"")
+      s=s "}"; print "    " s (w_out<n_wg_used?",":"")
     }
     print "  ],"
   }
@@ -99,10 +104,17 @@ END {
       # back to the WS Host (f[19]) when sni (f[7]) is empty, so a plain
       # ws node with a Host header but no TLS never gains a tls block.
       else if (f[16]=="tls"||f[7]!="") s=s ",\"tls\":" tls((f[7]!=""?f[7]:f[19]),f[8],f[9],f[20])
+      if (f[17]=="xhttp") fail("xhttp transport is not supported by sing-box")
+      if (f[17]=="ws") s=s ",\"transport\":{\"type\":\"ws\",\"path\":" q(f[18]) ",\"headers\":{\"Host\":" q(f[19]) "}}"
+      else if (f[17]=="grpc") s=s ",\"transport\":{\"type\":\"grpc\",\"service_name\":" q(f[18]!=""?f[18]:"/") "}"
+      else if (f[17]=="httpupgrade") s=s ",\"transport\":{\"type\":\"httpupgrade\",\"path\":" q(f[18]) ",\"host\":" q(f[19]) "}"
     }
     if (p=="vmess") {
       s=s ",\"uuid\":" q(f[6]) ",\"security\":\"auto\",\"alter_id\":" (f[10]~/^[0-9]+$/?f[10]:0)
+      if (f[17]=="xhttp") fail("xhttp transport is not supported by sing-box")
       if (f[17]=="ws") s=s ",\"transport\":{\"type\":\"ws\",\"path\":" q(f[18]) ",\"headers\":{\"Host\":" q(f[19]) "}}"
+      else if (f[17]=="grpc") s=s ",\"transport\":{\"type\":\"grpc\",\"service_name\":" q(f[18]!=""?f[18]:"/") "}"
+      else if (f[17]=="httpupgrade") s=s ",\"transport\":{\"type\":\"httpupgrade\",\"path\":" q(f[18]) ",\"host\":" q(f[19]) "}"
       # Imported VMess links carry the TLS name in the WS Host (f[19]) when
       # sni (f[7]) is empty and the server is a bare IP; fall back to it so
       # certificate verification has a name to check.  Plain ws nodes with

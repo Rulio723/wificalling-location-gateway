@@ -14,6 +14,12 @@
 var STATUS_FILE = '/var/run/wloc-service/status.json';
 var EVENTS_FILE = '/var/run/wloc-service/events.jsonl';
 
+var clearLog = rpc.declare({
+	object: 'luci.wloc',
+	method: 'clear_log',
+	params: [ 'log' ]
+});
+
 // 手动刷新按钮的忙碌状态；轮询重渲染表格时据此保持按钮为“刷新中”。
 var refreshingIp = false;
 
@@ -102,12 +108,25 @@ return view.extend({
 		function geoRows(s) {
 			var g = s.geo || {};
 			var deviceLabel = '-';
+			var deviceDisabled = false;
+			var exitVal = '-';
+			if (s.geo_source === 'manual') {
+				exitVal = wlocI18n.t('Manual mode - not applicable');
+			} else if (s.exit && s.exit.ip) {
+				exitVal = s.exit.ip;
+			} else if (s.exit && s.exit.last_error) {
+				exitVal = wlocI18n.t(s.exit.last_error);
+			}
 			if (s.assigned_device) {
 				// source_ip is a DynamicList value (array) on the device policy.
 				var dev = uci.sections('wificalling-gateway', 'device').find(function(d) {
 					return (d.source_ip || []).indexOf(s.assigned_device) >= 0;
 				});
 				deviceLabel = (dev && dev.label ? dev.label : s.assigned_device) + ' (' + s.assigned_device + ')';
+				deviceDisabled = !!(dev && dev.enabled === '0');
+			}
+			if (deviceDisabled) {
+				deviceLabel += ' — ' + wlocI18n.t('disabled! Enable it to follow its node');
 			}
 			return [
 				E('tr', { class: 'tr' }, [E('td', { class: 'td' }, wlocI18n.t('Service phase')), E('td', { class: 'td' }, phaseLabel(s.service_phase))]),
@@ -117,9 +136,9 @@ return view.extend({
 				E('tr', { class: 'tr' }, [E('td', { class: 'td' }, wlocI18n.t('City')), E('td', { class: 'td' }, g.city || '-')]),
 				E('tr', { class: 'tr' }, [E('td', { class: 'td' }, wlocI18n.t('Timezone')), E('td', { class: 'td' }, g.timezone || '-')]),
 				E('tr', { class: 'tr' }, [E('td', { class: 'td' }, wlocI18n.t('GPS (lat / lon)')), E('td', { class: 'td' }, gpsOf(g))]),
-				E('tr', { class: 'tr' }, [E('td', { class: 'td' }, wlocI18n.t('Geo state')), E('td', { class: 'td' }, g.state || '-')]),
+				E('tr', { class: 'tr' }, [E('td', { class: 'td' }, wlocI18n.t('Geo state')), E('td', { class: 'td' }, (g.state === 'manual') ? wlocI18n.t('Manual location') : (g.state || '-'))]),
 				E('tr', { class: 'tr' }, [E('td', { class: 'td' }, wlocI18n.t('Observed at')), E('td', { class: 'td' }, fmtTime(s.observed_at))]),
-				E('tr', { class: 'tr' }, [E('td', { class: 'td' }, wlocI18n.t('Exit IP')), E('td', { class: 'td' }, (s.exit && s.exit.ip) ? s.exit.ip : ((s.exit && s.exit.last_error) ? wlocI18n.t(s.exit.last_error) : '-'))])
+				E('tr', { class: 'tr' }, [E('td', { class: 'td' }, wlocI18n.t('Exit IP')), E('td', { class: 'td' }, exitVal)])
 			];
 		}
 		function renderGeo(s) { dom.content(geoBody, geoRows(s)); }
@@ -159,11 +178,12 @@ return view.extend({
 			ui.showModal(wlocI18n.t('Clear WLOC usage log?'), [E('p', {}, wlocI18n.t('This clears the local history of WLOC location events. Location interception settings are not affected.')),
 				E('div', { class: 'right' }, [E('button', { class: 'btn', click: ui.hideModal }, wlocI18n.t('Cancel')),
 				E('button', { class: 'btn cbi-button-negative', click: function() {
-					fs.write(EVENTS_FILE, '').then(function() {
+					clearLog('wloc').then(function() {
 						renderLog('');
 						ui.hideModal();
 						ui.addNotification(null, E('p', {}, wlocI18n.t('WLOC usage log cleared.')), 'info');
 					}).catch(function(err) {
+						ui.hideModal();
 						ui.addNotification(null, E('p', {}, wlocI18n.t('Unable to clear log: ') + ' ' + err.message), 'error');
 					});
 				} }, wlocI18n.t('Clear log'))])]);
