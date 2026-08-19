@@ -2,6 +2,35 @@
 
 All notable changes are documented here. Versions follow Semantic Versioning.
 
+## [1.2.1] - 2026-08-19
+
+Compiler optimization: only load proxy nodes that are actually referenced by device policies.
+
+### Changed
+
+- **Compiler node filtering**: `compiler.sh` now tracks which nodes are
+  referenced by active device policies and only compiles those into
+  `sing-box.json`. Unreferenced nodes are excluded from the outbound
+  list and WireGuard endpoint block. Verified on AX6S with 10 configured
+  nodes (7 WireGuard) and 1 active device: the generated sing-box.json
+  shrank from 2827 to 1534 bytes, and only the referenced vmess node
+  plus `direct` remain as outbounds.
+- **Reduced sing-box memory footprint**: on a Redmi AX6S the
+  wificalling-gateway sing-box instance RSS dropped from ~19-23 MB to
+  ~15 MB (16 → 9 threads) because unused WireGuard tunnels and protocol
+  stacks are no longer loaded; system available memory rose to ~29 MB.
+- **Packaging fix**: the project now ships its own complete
+  `init.d/wificalling-gateway` (full 24-field normalized.conf pipeline,
+  `wireguard_style` detection) and a clean LF `compiler.sh`, so the
+  integrated package no longer depends on the older 19-field init.d
+  bundled in the gateway 1.2.x IPK. Verified via fresh install on AX6S
+  (sing-box check passes, normalized.conf emits 25 fields) and the
+  four-environment Docker matrix.
+- **README housekeeping**: removed outdated "Wi‑Fi Calling Gateway 1.7"
+  references throughout; the project is now a single integrated package.
+  Updated release badge, install commands, build examples, and the
+  GitHub Linguist snapshot to match 1.2.1.
+
 ## [1.2.0] - 2026-08-17
 
 WireGuard node reliability and connection testing overhaul.
