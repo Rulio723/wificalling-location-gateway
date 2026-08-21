@@ -9,11 +9,11 @@
           "cert_info",
           "regen_ca",
           "restart_service",
-          "restart_unified",
           "verify_fingerprint",
           "health",
           "restart_gateway",
-          "node_test"
+          "node_test",
+          "update_status"
         ],
         "file": [
           "read"
@@ -46,8 +46,14 @@
           "regen_ca",
           "restart_service",
           "restart_unified",
+          "support_bundle",
           "verify_fingerprint",
-          "node_test"
+          "node_test",
+          "restart_gateway",
+          "clear_log",
+          "update_preflight",
+          "update_apply",
+          "update_recover"
         ],
         "file": [
           "write"
