@@ -18,15 +18,19 @@ use crate::exitprobe::{NodeRef, ProbeLimits};
 use crate::georesolver::runtime::{resolve_geo, GeoProviderRuntime};
 use crate::georesolver::{GeoResolution, ProviderRef};
 use crate::service::api::RequestParams;
-use crate::service::control::{
-    disable as control_disable, enable as control_enable, ControlError, RuntimeControl,
-};
+use crate::service::control::{ControlError, RuntimeControl};
 use crate::service::dispatch::{DispatchError, ServiceDispatch};
 use crate::service::state::{reduce, ServiceEvent, ServicePhase, ServiceState};
 use crate::service::status::{
     encode_status, DesiredState, EngineHealth, ExitState, GeoState, StatusInputs,
 };
+use crate::service::supervisor::{SupervisorError, UnifiedSupervisor};
 use crate::wloc::PatchTarget;
+
+/// Upper bounds for the root-local structured event log. These are small
+/// enough for AX6S-class gateways while retaining recent diagnostic history.
+pub(crate) const MAX_EVENT_LOG_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_EVENT_LINE_BYTES: usize = 2048;
 
 fn current_unix() -> u64 {
     std::time::SystemTime::now()
@@ -42,6 +46,13 @@ fn map_control_error(error: ControlError) -> DispatchError {
         ControlError::RedirectStillPresent => DispatchError::RedirectPresent,
         ControlError::CleanupUnsafe => DispatchError::CleanupUnsafe,
         ControlError::RuntimeFailure(_) => DispatchError::RuntimeFailure,
+    }
+}
+
+fn map_supervisor_error(error: SupervisorError) -> DispatchError {
+    match error {
+        SupervisorError::Control(control_error) => map_control_error(control_error),
+        SupervisorError::Transition(_) => DispatchError::InvalidConfig,
     }
 }
 
@@ -84,7 +95,7 @@ struct ManualGeoLookup {
 /// and Geo resolver.
 pub struct WlocService<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> {
     state: ServiceState,
-    runtime: R,
+    supervisor: UnifiedSupervisor<R>,
     probe: P,
     geo: G,
     node_ref: NodeRef,
@@ -144,7 +155,7 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> WlocService<
     pub fn new(runtime: R, probe: P, geo: G, config: WlocServiceConfig) -> Self {
         Self {
             state: ServiceState::disabled(),
-            runtime,
+            supervisor: UnifiedSupervisor::new(runtime),
             probe,
             geo,
             node_ref: config.node_ref,
@@ -190,6 +201,19 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> WlocService<
     /// Probe and resolve evidence when the cached observation is missing,
     /// stale, or the last probe failed.
     fn refresh_evidence_at(&mut self, now_unix: u64) {
+        // An invalid or unsupported profile is disabled at startup, but
+        // status and periodic refreshes still run independently of the
+        // enable path. Do not let those paths create an unbound legacy probe
+        // that silently selects the first outbound, and withdraw any stale
+        // evidence/patch target already held by the service.
+        if !self.scope_valid {
+            self.exit_evidence = ExitEvidence::Unavailable;
+            self.geo_resolution = GeoResolution::Unavailable;
+            self.last_probe_fingerprint = None;
+            self.last_probe_error = Some("invalid service scope".to_owned());
+            self.publish_patch_target();
+            return;
+        }
         // Manual mode pins the location to the preset coordinates; exit
         // probing exists only to drive auto-follow, so it is skipped
         // entirely in manual mode (no reverse probe, no misleading IP).
@@ -240,6 +264,14 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> WlocService<
     /// Publish the current patch target: a manual preset when set, otherwise
     /// the freshest Geo record (in Auto mode).
     fn publish_patch_target(&self) {
+        if !self.scope_valid {
+            if let Some(sink) = &self.patch_sink {
+                if let Ok(mut guard) = sink.lock() {
+                    *guard = None;
+                }
+            }
+            return;
+        }
         let target = match self.geo_source {
             GeoSource::Manual {
                 latitude,
@@ -618,8 +650,9 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> ServiceDispa
         if self.state.phase() != ServicePhase::Disabled {
             return Err(DispatchError::InvalidConfig);
         }
-        control_enable(&mut self.runtime, self.scope_valid, self.ipv6_ready)
-            .map_err(map_control_error)?;
+        self.supervisor
+            .enable(self.scope_valid, self.ipv6_ready)
+            .map_err(map_supervisor_error)?;
         self.apply_enable_events();
         self.desired_state = DesiredState::Enabled;
         Ok(())
@@ -629,7 +662,7 @@ impl<R: RuntimeControl, P: ExitProbeRuntime, G: GeoProviderRuntime> ServiceDispa
         if self.state.phase() == ServicePhase::Disabled {
             return Ok(());
         }
-        control_disable(&mut self.runtime).map_err(map_control_error)?;
+        self.supervisor.disable().map_err(map_supervisor_error)?;
         for event in [ServiceEvent::BeginDisable, ServiceEvent::EngineStopped] {
             match reduce(&self.state, event) {
                 Ok(next) => self.state = next,
@@ -690,18 +723,44 @@ fn probe_needed(
 /// Append one JSON line to an append-only log file (bounded to avoid
 /// unbounded growth).
 fn append_line(path: &std::path::Path, value: &serde_json::Value) {
-    use std::io::Write as _;
     let mut line = serde_json::to_string(value).unwrap_or_default();
     line.push('\n');
+    if line.len() > MAX_EVENT_LINE_BYTES {
+        return;
+    }
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-    {
-        let _ = file.write_all(line.as_bytes());
+
+    let existing = std::fs::read(path).unwrap_or_default();
+    if existing.len().saturating_add(line.len()) <= MAX_EVENT_LOG_BYTES {
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            use std::io::Write as _;
+            let _ = file.write_all(line.as_bytes());
+        }
+        return;
+    }
+
+    let keep_bytes = MAX_EVENT_LOG_BYTES.saturating_sub(line.len());
+    let mut retained = if existing.len() > keep_bytes {
+        let start = existing.len() - keep_bytes;
+        let boundary = existing[start..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|offset| start + offset + 1)
+            .unwrap_or(existing.len());
+        existing[boundary..].to_vec()
+    } else {
+        existing
+    };
+    retained.extend_from_slice(line.as_bytes());
+    let temporary = path.with_extension(format!("log.tmp.{}", std::process::id()));
+    if std::fs::write(&temporary, retained).is_ok() {
+        let _ = std::fs::rename(temporary, path);
     }
 }
 
@@ -731,5 +790,46 @@ mod probe_needed_tests {
         // A probe that gained fingerprint support after startup also
         // re-probes once.
         assert!(probe_needed(true, Some(1), None));
+    }
+}
+
+#[cfg(test)]
+mod bounded_log_tests {
+    use super::{append_line, MAX_EVENT_LINE_BYTES, MAX_EVENT_LOG_BYTES};
+    use serde_json::json;
+
+    #[test]
+    fn event_log_never_exceeds_storage_bound() {
+        let path = std::env::temp_dir().join(format!(
+            "wloc-bounded-events-{}-{}.jsonl",
+            std::process::id(),
+            super::current_unix()
+        ));
+        let payload = "x".repeat(MAX_EVENT_LINE_BYTES / 2);
+        for index in 0..128 {
+            append_line(&path, &json!({"event": index, "payload": payload}));
+        }
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.len() <= MAX_EVENT_LOG_BYTES);
+        assert!(bytes.ends_with(b"\n"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn oversized_event_is_dropped_without_corrupting_existing_lines() {
+        let path = std::env::temp_dir().join(format!(
+            "wloc-bounded-event-drop-{}-{}.jsonl",
+            std::process::id(),
+            super::current_unix()
+        ));
+        append_line(&path, &json!({"event": "kept"}));
+        append_line(
+            &path,
+            &json!({"payload": "x".repeat(MAX_EVENT_LINE_BYTES * 2)}),
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("kept"));
+        assert!(!text.contains(&"x".repeat(MAX_EVENT_LINE_BYTES * 2)));
+        let _ = std::fs::remove_file(path);
     }
 }

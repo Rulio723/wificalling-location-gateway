@@ -1,9 +1,9 @@
 //! Run the WLOC service control daemon over a root-owned Unix socket.
 //!
-//! The daemon serves the frozen control API on a local Unix socket. Runtime
-//! adapters are stubs until the OpenWrt sing-box/nftables/Geo adapters land;
-//! their behavior is configurable through the `WLOC_STUB_*` environment
-//! variables so the control plane can be exercised end to end on any host.
+//! The daemon serves the frozen control API on a local Unix socket. Its
+//! OpenWrt runtime adapter delegates only the component-owned WLOC redirect;
+//! process ownership and the Gateway data plane remain with the unified
+//! supervisor.
 //!
 //! Socket path: `WLOC_SOCKET` (default `/var/run/wloc-service/control.sock`).
 
@@ -13,7 +13,9 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use wificalling_location_gateway::app::{WlocService, WlocServiceConfig};
-use wificalling_location_gateway::config::{LocationMode, WlocUciConfig};
+use wificalling_location_gateway::config::{
+    DeviceProfile, LocationMode, RuntimeProfile, WlocUciConfig,
+};
 use wificalling_location_gateway::exitprobe::runtime::{ExitProbeRuntime, ProbeFailure};
 use wificalling_location_gateway::exitprobe::{NodeRef, ProbeLimits};
 use wificalling_location_gateway::georesolver::http::GeoHttpClient;
@@ -24,6 +26,9 @@ use wificalling_location_gateway::mitm::CaBundle;
 use wificalling_location_gateway::service::api::RequestParams;
 use wificalling_location_gateway::service::control::{RuntimeControl, RuntimeFailure};
 use wificalling_location_gateway::service::dispatch::ServiceDispatch;
+use wificalling_location_gateway::service::profile_runtime::{
+    ProfileRuntimeControl, ProfileRuntimeError,
+};
 use wificalling_location_gateway::service::server::ControlServer;
 use wificalling_location_gateway::service::GeoRecord;
 use wificalling_location_gateway::wloc::PatchTarget;
@@ -45,11 +50,122 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-/// No-op runtime control: every adapter step succeeds and the engine is
-/// healthy. Replaced by the nftables/procd adapter on OpenWrt.
-struct StubRuntime;
+fn disabled_runtime_profile() -> RuntimeProfile {
+    RuntimeProfile {
+        id: "invalid".to_owned(),
+        enabled: false,
+        runtime_supported: false,
+        assigned_device: None,
+        node_ref: "default".to_owned(),
+        location_mode: LocationMode::Auto,
+        manual_latitude: None,
+        manual_longitude: None,
+    }
+}
 
-impl RuntimeControl for StubRuntime {
+fn runtime_profile_from_uci(uci: &WlocUciConfig) -> RuntimeProfile {
+    match uci
+        .profile_model()
+        .and_then(|model| model.single_runtime_profile())
+    {
+        Ok(mut profile) => {
+            if !profile.runtime_supported {
+                eprintln!(
+                    "wloc-service: profile {} has no IP runtime binding; staying disabled",
+                    profile.id
+                );
+                profile.enabled = false;
+            }
+            profile
+        }
+        Err(error) => {
+            eprintln!("wloc-service: profile is not runnable yet: {error}; staying disabled");
+            disabled_runtime_profile()
+        }
+    }
+}
+
+fn runtime_scope_valid(config_valid: bool, profile: &RuntimeProfile) -> bool {
+    config_valid && profile.runtime_supported
+}
+
+/// Runtime control for the daemon's OpenWrt boundary.
+///
+/// The outer unified supervisor owns process start/stop and watchdogs. This
+/// daemon delegates the component-owned redirect and queries its presence;
+/// self-stop/drain operations are no-ops because the control server must not
+/// terminate itself.
+struct OpenWrtRuntime {
+    redirect_helper: std::path::PathBuf,
+    profile_redirect_helper: std::path::PathBuf,
+    nft_binary: std::path::PathBuf,
+    defer_first_redirect: bool,
+}
+
+impl OpenWrtRuntime {
+    fn from_env() -> Self {
+        let mut runtime = Self::new(
+            std::env::var("WLOC_REDIRECT_HELPER")
+                .unwrap_or_else(|_| "/usr/sbin/wloc-redirect-sync.sh".to_owned()),
+            std::env::var("WLOC_NFT_BINARY").unwrap_or_else(|_| "nft".to_owned()),
+        );
+        runtime.profile_redirect_helper = std::env::var("WLOC_PROFILE_REDIRECT_HELPER")
+            .unwrap_or_else(|_| "/usr/sbin/wloc-profile-redirect.sh".to_owned())
+            .into();
+        runtime.defer_first_redirect = std::env::var("WLOC_DEFER_REDIRECT").as_deref() == Ok("1");
+        runtime
+    }
+
+    fn new(
+        redirect_helper: impl Into<std::path::PathBuf>,
+        nft_binary: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        let redirect_helper = redirect_helper.into();
+        Self {
+            profile_redirect_helper: redirect_helper.clone(),
+            redirect_helper,
+            nft_binary: nft_binary.into(),
+            defer_first_redirect: false,
+        }
+    }
+
+    #[cfg(test)]
+    fn defer_first_redirect(&mut self) {
+        self.defer_first_redirect = true;
+    }
+
+    fn run_redirect(&self, action: &str) -> Result<(), RuntimeFailure> {
+        std::process::Command::new(&self.redirect_helper)
+            .arg(action)
+            .status()
+            .map_err(|_| RuntimeFailure)
+            .and_then(|status| status.success().then_some(()).ok_or(RuntimeFailure))
+    }
+
+    fn run_profile_redirect(
+        &self,
+        action: &str,
+        profile_id: &str,
+        assigned_device: Option<&str>,
+    ) -> Result<(), ProfileRuntimeError> {
+        let mut command = std::process::Command::new(&self.profile_redirect_helper);
+        command.arg(action).arg(profile_id);
+        if let Some(device) = assigned_device {
+            command.arg(device);
+        }
+        command
+            .status()
+            .map_err(|_| ProfileRuntimeError::RedirectInstall)
+            .and_then(|status| {
+                status
+                    .success()
+                    .then_some(())
+                    .ok_or(ProfileRuntimeError::RedirectInstall)
+            })
+    }
+}
+
+impl RuntimeControl for OpenWrtRuntime {
     fn start_engine_passthrough(&mut self) -> Result<(), RuntimeFailure> {
         Ok(())
     }
@@ -60,13 +176,21 @@ impl RuntimeControl for StubRuntime {
         Ok(())
     }
     fn install_exact_redirect(&mut self) -> Result<(), RuntimeFailure> {
-        Ok(())
+        if self.defer_first_redirect {
+            self.defer_first_redirect = false;
+            return Ok(());
+        }
+        self.run_redirect("start")
     }
     fn remove_redirect(&mut self) -> Result<(), RuntimeFailure> {
-        Ok(())
+        self.run_redirect("stop")
     }
     fn redirect_present(&mut self) -> Result<bool, RuntimeFailure> {
-        Ok(false)
+        std::process::Command::new(&self.nft_binary)
+            .args(["list", "table", "inet", "wloc_service"])
+            .status()
+            .map(|status| status.success())
+            .map_err(|_| RuntimeFailure)
     }
     fn disarm_watchdog(&mut self) -> Result<(), RuntimeFailure> {
         Ok(())
@@ -76,6 +200,44 @@ impl RuntimeControl for StubRuntime {
     }
     fn stop_engine(&mut self) -> Result<(), RuntimeFailure> {
         Ok(())
+    }
+}
+
+impl ProfileRuntimeControl for OpenWrtRuntime {
+    fn ensure_shared_engine(&mut self) -> Result<(), ProfileRuntimeError> {
+        // The unified supervisor owns the single Gateway/WLOC process set.
+        Ok(())
+    }
+
+    fn shared_engine_healthy(&mut self) -> Result<bool, ProfileRuntimeError> {
+        // The supervisor has already admitted the service before profile
+        // redirects are installed. A future health adapter can tighten this
+        // gate without changing the profile state machine.
+        Ok(true)
+    }
+
+    fn install_profile_redirect(
+        &mut self,
+        profile: &DeviceProfile,
+    ) -> Result<(), ProfileRuntimeError> {
+        let address = profile
+            .assigned_device
+            .as_deref()
+            .filter(|address| address.parse::<std::net::Ipv4Addr>().is_ok())
+            .ok_or(ProfileRuntimeError::UnsupportedDevice)?;
+        self.run_profile_redirect("start", &profile.id, Some(address))
+    }
+
+    fn remove_profile_redirect(&mut self, profile_id: &str) -> Result<(), ProfileRuntimeError> {
+        self.run_profile_redirect("stop", profile_id, None)
+    }
+
+    fn profile_redirect_present(&mut self, profile_id: &str) -> Result<bool, ProfileRuntimeError> {
+        let status = std::process::Command::new(&self.profile_redirect_helper)
+            .args(["status", profile_id])
+            .status()
+            .map_err(|_| ProfileRuntimeError::CleanupUnsafe)?;
+        Ok(status.success())
     }
 }
 
@@ -114,17 +276,20 @@ fn build_probe(assigned_device: &str, probe_port: u16) -> Box<dyn ExitProbeRunti
             .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
     );
     let probe_port: u16 = env_or("WLOC_PROBE_PORT", probe_port);
-    Box::new(
-        wificalling_location_gateway::exitprobe::singbox::SingBoxProbe::new(
-            std::path::PathBuf::from(
-                std::env::var("WLOC_SINGBOX_CONFIG")
-                    .unwrap_or_else(|_| "/var/run/wificalling-gateway/sing-box.json".into()),
-            ),
-            device_ip,
-            probe_port,
-            std::path::PathBuf::from("/tmp/wloc-probe"),
+    let probe = wificalling_location_gateway::exitprobe::singbox::SingBoxProbe::new(
+        std::path::PathBuf::from(
+            std::env::var("WLOC_SINGBOX_CONFIG")
+                .unwrap_or_else(|_| "/var/run/wificalling-gateway/sing-box.json".into()),
         ),
-    )
+        device_ip,
+        probe_port,
+        std::path::PathBuf::from("/tmp/wloc-probe"),
+    );
+    if assigned_device.trim().is_empty() {
+        Box::new(probe)
+    } else {
+        Box::new(probe.with_required_device_binding())
+    }
 }
 
 /// Stub Geo provider: returns a fixed, valid record for the queried exit.
@@ -207,30 +372,51 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .unwrap_or_else(|_| "/var/run/wloc-service/control.sock".into());
 
     // Persisted configuration from /etc/config/wloc-service (UCI). A missing
-    // file falls back to the defaults so the daemon still runs unconfigured.
+    // file preserves the v1 unconfigured-default behavior; an existing but
+    // invalid file is fail-closed and cannot later be enabled over the socket.
     let uci_path = std::env::var("WLOC_UCI_CONFIG")
         .unwrap_or_else(|_| wificalling_location_gateway::config::uci::DEFAULT_UCI_PATH.into());
-    let uci = match WlocUciConfig::load(Path::new(&uci_path)) {
-        Ok(config) => config,
+    let (uci, config_valid) = match WlocUciConfig::load(Path::new(&uci_path)) {
+        Ok(config) => (config, true),
+        Err(error) if !Path::new(&uci_path).exists() => {
+            eprintln!("wloc-service: {error}; using unconfigured defaults");
+            (WlocUciConfig::default(), true)
+        }
         Err(error) => {
-            eprintln!("wloc-service: {error}; using defaults");
-            WlocUciConfig::default()
+            eprintln!("wloc-service: {error}; using disabled defaults");
+            (
+                WlocUciConfig {
+                    enabled: false,
+                    ..WlocUciConfig::default()
+                },
+                false,
+            )
         }
     };
+    let runtime_profile = runtime_profile_from_uci(&uci);
     // The device whose node binding the location follows. It is normally
     // chosen from LuCI; when unset, fall back to the first device policy of
     // the Gateway config so a fresh install follows something on any subnet
     // instead of a fixed example address.
-    let assigned_device = if uci.assigned_device.trim().is_empty() {
+    let assigned_device = if !runtime_profile.runtime_supported {
+        String::new()
+    } else if runtime_profile
+        .assigned_device
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
         gateway_first_device_ip().unwrap_or_default()
     } else {
-        uci.assigned_device.clone()
+        runtime_profile.assigned_device.clone().unwrap_or_default()
     };
     eprintln!(
-        "wloc-service: uci enabled={} geo_source={:?} node={} device={}",
-        uci.enabled,
-        uci.location_mode,
-        uci.node_ref,
+        "wloc-service: profile={} enabled={} geo_source={:?} node={} device={}",
+        runtime_profile.id,
+        runtime_profile.enabled,
+        runtime_profile.location_mode,
+        runtime_profile.node_ref,
         if assigned_device.is_empty() {
             "(none)".to_owned()
         } else {
@@ -253,17 +439,17 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     };
 
     let service = WlocService::new(
-        StubRuntime,
+        OpenWrtRuntime::from_env(),
         build_probe(&assigned_device, uci.probe_port),
         geo,
         WlocServiceConfig {
-            node_ref: NodeRef::new(&uci.node_ref)
+            node_ref: NodeRef::new(&runtime_profile.node_ref)
                 .unwrap_or_else(|_| NodeRef::new("default").expect("static node ref is valid")),
             providers: vec![ProviderRef::new("http").expect("static provider ref is valid")],
             probe_limits: ProbeLimits {
                 max_observation_age: Duration::from_secs(uci.probe_interval_secs),
             },
-            scope_valid: true,
+            scope_valid: runtime_scope_valid(config_valid, &runtime_profile),
             ipv6_ready: true,
             assigned_device_configured: !assigned_device.is_empty(),
             assigned_device: if assigned_device.is_empty() {
@@ -385,8 +571,11 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // manual location preset first (so a manual target is already fresh), then
     // the desired enabled state. Failures are logged, not fatal: the daemon
     // still serves status and can be steered through the control API.
-    if uci.location_mode == LocationMode::Manual {
-        if let (Some(latitude), Some(longitude)) = (uci.manual_latitude, uci.manual_longitude) {
+    if runtime_profile.location_mode == LocationMode::Manual {
+        if let (Some(latitude), Some(longitude)) = (
+            runtime_profile.manual_latitude,
+            runtime_profile.manual_longitude,
+        ) {
             let params = RequestParams {
                 query: None,
                 latitude: Some(latitude),
@@ -401,7 +590,7 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             );
         }
     }
-    if uci.enabled {
+    if runtime_profile.enabled {
         if let Err(error) = service.enable() {
             eprintln!("wloc-service: enable failed: {error:?}");
         }
@@ -607,5 +796,121 @@ mod tests {
     fn ignores_non_ip_tokens() {
         let output = "elements = { 59.82.17.33, hostname, 10.0.0.1/8 }\n";
         assert_eq!(parse_apple_ips(output), vec!["59.82.17.33"]);
+    }
+
+    #[test]
+    fn explicit_profile_is_the_single_runtime_source() {
+        let config = WlocUciConfig::parse(
+            "config wloc-service 'main'\n\toption enabled '0'\n\toption node_ref 'legacy'\n\toption assigned_device '192.168.1.200'\nconfig device 'phone'\n\toption label 'Phone'\n\toption assigned_device '192.168.1.100'\n\toption node_ref 'profile-node'\n\toption geo_source 'auto'\n",
+        )
+        .unwrap();
+        let profile = runtime_profile_from_uci(&config);
+        assert_eq!(profile.id, "phone");
+        assert!(profile.enabled);
+        assert_eq!(profile.assigned_device.as_deref(), Some("192.168.1.100"));
+        assert_eq!(profile.node_ref, "profile-node");
+    }
+
+    #[test]
+    fn multiple_profiles_never_select_one_implicitly() {
+        let config = WlocUciConfig::parse(
+            "config device 'phone'\n\toption assigned_device '192.168.1.100'\nconfig device 'tablet'\n\toption assigned_device '192.168.1.101'\n",
+        )
+        .unwrap();
+        let profile = runtime_profile_from_uci(&config);
+        assert!(!profile.enabled);
+        assert_eq!(profile.id, "invalid");
+    }
+
+    #[test]
+    fn mac_profile_is_not_enabled_until_runtime_resolution_exists() {
+        let config = WlocUciConfig::parse(
+            "config device 'phone'\n\toption assigned_device 'aa:bb:cc:dd:ee:ff'\n",
+        )
+        .unwrap();
+        let profile = runtime_profile_from_uci(&config);
+        assert!(!profile.enabled);
+        assert!(!profile.runtime_supported);
+    }
+
+    #[test]
+    fn invalid_uci_cannot_be_enabled_from_the_control_socket() {
+        let profile = disabled_runtime_profile();
+        assert!(!runtime_scope_valid(false, &profile));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn openwrt_runtime_delegates_only_component_redirect_actions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "wloc-runtime-test-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let log = root.join("actions.log");
+        let helper = root.join("redirect-helper.sh");
+        let script = format!("#!/bin/sh\nprintf '%s\\n' \"$1\" >> '{}'\n", log.display());
+        std::fs::write(&helper, script).unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut runtime = OpenWrtRuntime::new(&helper, &helper);
+        runtime.defer_first_redirect();
+        runtime.install_exact_redirect().unwrap();
+        runtime.remove_redirect().unwrap();
+        runtime.install_exact_redirect().unwrap();
+
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "stop\nstart\n");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn openwrt_runtime_delegates_profile_scoped_redirect_actions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "wloc-profile-runtime-test-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let log = root.join("actions.log");
+        let helper = root.join("profile-redirect-helper.sh");
+        let script = format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n", log.display());
+        std::fs::write(&helper, script).unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut runtime = OpenWrtRuntime::new(&helper, &helper);
+        let profile = wificalling_location_gateway::config::DeviceProfile {
+            id: "phone".to_owned(),
+            label: "Phone".to_owned(),
+            assigned_device: Some("192.168.1.100".to_owned()),
+            node_ref: "default".to_owned(),
+            node_mode: wificalling_location_gateway::config::NodeSelectionMode::Fixed,
+            location_mode: LocationMode::Auto,
+            manual_latitude: None,
+            manual_longitude: None,
+            manual_location_ref: None,
+            enabled: true,
+        };
+        wificalling_location_gateway::service::profile_runtime::ProfileRuntimeControl::install_profile_redirect(
+            &mut runtime,
+            &profile,
+        )
+        .unwrap();
+        wificalling_location_gateway::service::profile_runtime::ProfileRuntimeControl::remove_profile_redirect(
+            &mut runtime,
+            "phone",
+        )
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&log).unwrap(),
+            "start phone 192.168.1.100\nstop phone\n"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }
