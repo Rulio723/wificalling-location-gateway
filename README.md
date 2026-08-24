@@ -7,7 +7,7 @@
 A standalone Rust service handles exit geolocation, WLOC response rewriting, certificate lifecycle, precise traffic isolation, and LuCI management — all integrated into a single installable package.
 
 [![CI](https://github.com/smthdagg/wificalling-location-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/smthdagg/wificalling-location-gateway/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/badge/release-v1.2.2-blue.svg)](https://github.com/smthdagg/wificalling-location-gateway/releases/tag/v1.2.2)
+[![Release](https://img.shields.io/badge/release-v1.3.0--r1-blue.svg)](https://github.com/smthdagg/wificalling-location-gateway/releases/tag/v1.3.0-r1)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Rust 1.90](https://img.shields.io/badge/Rust-1.90-orange.svg?logo=rust)](Cargo.toml)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.12-00B5E2.svg?logo=openwrt)](#support-and-validation-status)
@@ -71,7 +71,8 @@ The core boundary of the project is "**independent, precise, and revertible**": 
 ## How it works
 
 ```mermaid
-flowchart LR
+%%{init: {"flowchart": {"toolbar": false}}}%%
+flowchart TD
     I["Authorized test iPhone"] -->|"Wi‑Fi Calling · UDP 500/4500"| G["Wi‑Fi Calling Gateway"]
     G --> N["Bound sing-box node"]
     I -->|"Apple WLOC · TCP 443"| D["Precise DNS / nftables isolation"]
@@ -113,33 +114,33 @@ More detail: [WLOC Service API](docs/api/WLOC_SERVICE_API.md), [Threat model](do
 
 | Platform | Arch | Package manager | Current evidence | Status |
 |---|---:|---|---|---|
-| Redmi AX6S · ImmortalWrt 24.10.6 | MediaTek MT7622 / AArch64 | opkg | Official AArch64 OpenWrt 24.10.5 Docker install/start matrix; plus real-device procd, LuCI, auto/manual switch, certificate, and iPhone WLOC path | **Docker + real device passed** |
+| Redmi AX6S · ImmortalWrt 24.10.6 | MediaTek MT7622 / AArch64 | opkg | Exact r5 Lite asset installed and cold-booted; 20.4 MB overlay remained free; WCG/WLOC, tmpfs sing-box, nftables and config hashes passed; a real iPhone WLOC request was intercepted and synthesized | **Docker + router + iPhone WLOC passed** |
 | OpenWrt 24.10.8 | x86_64 | opkg / IPK | Docker boot of init/ubus, integrated package install, service start, socket and v1 status checks | **Install matrix passed** |
 | iStoreOS 24.10.5 | x86_64 | opkg / IPK | Same as above | **Install matrix passed** |
 | OpenWrt 25.12.3 | x86_64 | apk / APK v3 | Same, using native APK v3, not a renamed IPK | **Install matrix passed** |
 | Other OpenWrt / ImmortalWrt versions or CPUs | — | — | No device/SDK evidence yet | **Not verified** |
 
-The runtime packages contain a Rust ELF and **must match the router CPU architecture**; only the LuCI package is `all`/`noarch`. x86_64 packages are built with a pinned SDK; AX6S uses a separate AArch64 `cortex-a53` cross toolchain. The formal Docker matrix installs all three release assets. Docker verifies install and boot, not nftables, DNS, carrier, or iPhone end-to-end behavior.
+The runtime packages contain architecture-specific ELF files and **must match the router CPU architecture**. x86_64 packages are built with pinned SDKs; AX6S uses a separate AArch64 `cortex-a53` toolchain. The formal Docker matrix installs both runtime variants for all three targets (six assets, eight runtime cases). Docker verifies install and boot; the AX6S row adds real router and iPhone WLOC evidence.
 
 ## Installation
 
 ### Prerequisites
 
-- sing-box, firewall4/nftables, LuCI, and rpcd available.
+- firewall4/nftables, LuCI, and rpcd available. Standard additionally requires a firmware/feed `sing-box`; Lite bundles its own runtime.
 - A fixed DHCP address for the test iPhone and a correct node binding in the Gateway.
 - Router config backed up; WARP, Shadowrocket, or any other VPN on the phone stays off during router WLOC testing.
 - Install this project's CA only on the dedicated test device and verify the certificate fingerprint.
 
 ### 1. Choose the right package
 
-The Redmi AX6S uses a single architecture-specific integrated package:
+Release `v1.3.0-r1` provides two installation variants for each of three targets. Both belong to this project and contain the same WCG, WLOC, control tools, LuCI and saved UCI schema:
 
-- `wificalling-location-gateway_<version>_aarch64_cortex-a53.ipk`
+- Standard: `wificalling-location-gateway_1.3.0-r1_aarch64_cortex-a53.ipk`, `wificalling-location-gateway_1.3.0-r1_x86_64.ipk`, `wificalling-location-gateway-1.3.0-r1.apk`
+- Lite: `wificalling-location-gateway-lite_1.3.0-r1_aarch64_cortex-a53.ipk`, `wificalling-location-gateway-lite_1.3.0-r1_x86_64.ipk`, `wificalling-location-gateway-lite-1.3.0-r1.apk`
 
-It bundles the Wi‑Fi Calling Gateway, the WLOC service, control tools, and the unified LuCI; installing `luci-app-wificalling-gateway` or `wloc-service` separately is not required. On reinstall or upgrade, opkg preserves `/etc/config/wificalling-gateway` and `/etc/config/wloc-service`.
+Choose **Standard** when the firmware already supplies a suitable `/usr/bin/sing-box`. Choose **Lite** for constrained gateways such as AX6S: it stores a hash-pinned compressed sing-box in flash, transparently expands one shared copy into `/tmp`, and applies the validated 24 MiB WCG heap profile. Standard and Lite conflict intentionally and must not be installed together. Both preserve `/etc/config/wificalling-gateway` and `/etc/config/wloc-service`.
 
-Since the formal 1.0 line, every platform gets exactly one complete integrated package named
-`wificalling-location-gateway` — Wi‑Fi Calling Gateway, WLOC service, control tools, and unified LuCI in one; users no longer install component packages separately.
+The variant suffix changes runtime ownership only; it does not create a separate product or restore split component packages.
 
 Two ways to install:
 
@@ -163,24 +164,25 @@ Full instructions for both methods live in the
 [feed repository](https://github.com/smthdagg/wificalling-location-gateway-feed)
 (including the manual `.apk` install commands for OpenWrt 25.x).
 
-### 2. Redmi AX6S (single integrated IPK)
+### 2. Redmi AX6S (Lite recommended)
 
 ```sh
-opkg install /tmp/wificalling-location-gateway_<version>_aarch64_cortex-a53.ipk
+opkg install /tmp/wificalling-location-gateway-lite_1.3.0-r1_aarch64_cortex-a53.ipk
 ```
 
-Do not run `opkg remove` first; installing directly restores missing components and keeps the existing configuration. After installing, check both services under "Verify the services" below.
+Back up both UCI files first. On storage-constrained AX6S units, stop the services and remove the old integrated and sing-box packages before installing Lite; do not delete the saved UCI files. The r5 Lite package replaces the separate sing-box package and owns its transparent wrapper.
 
 ### 3. OpenWrt 24.10 / iStoreOS 24.10 (IPK)
 
 ```sh
-opkg install /tmp/wificalling-location-gateway_1.2.2-r1_x86_64.ipk
+opkg install /tmp/wificalling-location-gateway_1.3.0-r1_x86_64.ipk
+# Or use the corresponding Lite asset when a bundled, bounded runtime is preferred.
 ```
 
 ### 4. OpenWrt 25.12 (native APK v3)
 
 ```sh
-apk add --allow-untrusted /tmp/wificalling-location-gateway-1.2.2-r1.apk
+apk add --allow-untrusted /tmp/wificalling-location-gateway-1.3.0-r1.apk
 ```
 
 `--allow-untrusted` applies only to locally built packages that are not yet signed in a repository. Formal releases use repository signing; never rename an IPK into an APK.
@@ -242,12 +244,12 @@ This pins the OpenWrt 24.10.8 `mediatek/mt7622` toolchain, Rust version, and SHA
   --out-dir "$PWD/dist/runtime/x86_64"
 
 ./scripts/openwrt/build-release-packages.sh \
-  --version 1.2.2 \
-  --release 1 \
+  --version 1.3.0 \
+  --release 4 \
   --arch x86_64 \
   --service-bin "$PWD/dist/runtime/x86_64/wloc-service" \
   --ctl-bin "$PWD/dist/runtime/x86_64/wloc-ctl" \
-  --gateway-ipk /absolute/path/luci-app-wificalling-gateway_<version>_all.ipk \
+  --gateway-ipk /absolute/path/wificalling-location-gateway_1.3.0-r1_aarch64_cortex-a53.ipk \
   --gateway-sha256 <verified-sha256> \
   --out-dir "$PWD/dist/openwrt-release"
 ```
@@ -256,7 +258,7 @@ This pins the OpenWrt 24.10.8 `mediatek/mt7622` toolchain, Rust version, and SHA
 
 ```sh
 ./scripts/openwrt/verify-docker-matrix.sh \
-  --dist-dir "$PWD/dist/v1.2.2"
+  --dist-dir "$PWD/dist/wloc-openwrt-release-r4"
 ```
 
 Builds use the official OpenWrt SDK pinned by digest; after dependency preparation, product compilation runs locked/offline with read-only sources in a network-disabled container. Full boundaries and results: [OpenWrt packaging and Docker matrix](docs/testing/OPENWRT_PACKAGE_DOCKER_MATRIX.md).
@@ -300,6 +302,14 @@ docs/                        API, security, deployment, testing, bilingual guide
 
 Report vulnerabilities privately via [SECURITY.md](SECURITY.md); never paste certificates, IPs, node configs, or device information into public issues.
 
+## Notes & gotchas
+
+These come from the working model above (device → TPROXY intercept → wloc MITM → Apple WLOC), not theory. Each was hit in real testing.
+
+- **PassWall coexistence.** This plugin uses its own `inet wificalling_gateway` table and its own `fwmark 0x66 → table 166` TPROXY return path, kept separate from PassWall. PassWall runs a global TPROXY on `inet passwall` (`PSW_MANGLE` / `PSW_NAT`) that would otherwise capture the test device's traffic before this plugin sees it. `passwall-bypass.sh` therefore inserts a `return` rule (`WFC_GATEWAY_BYPASS`) for each bound test-device IP into PassWall's chains. If that bypass is missing or stale, the device's Apple 443 traffic is silently taken by PassWall and the WLOC intercept never fires — the plugin looks installed but does nothing. Re-run the bypass whenever the device set changes.
+- **wloc → Apple TPROXY loopback.** The WLOC service itself reaches `gs-loc.apple.com` as a client. Its outbound handshake rides the same TPROXY plumbing (`ip rule fwmark 0x66 lookup 166`, `ip route local 0.0.0.0/0 dev lo table 166`). If that mark, route table, or the `apple_hosts` set is wrong, the service's own outbound handshake is caught by its own redirect and loops — the device reaches wloc fine, but wloc cannot complete the handshake with Apple. This is the classic "device reaches the server, server can't reach Apple" symptom; check the nftables return path and `apple_hosts` before blaming DNS or the proxy node.
+- **wloc → Apple response rewrite.** Even with a clean handshake, Apple rejects a proxied WLOC response unless the rewrite is exact (see `issue-17`): a duplicated `Content-Length` makes Apple return `400 Bad Request`; a response not forced to `Accept-Encoding: identity` comes back gzip-compressed and cannot be rewritten; and the 10-byte opaque header framing (`[0:2]=0x0001`, `[6:10]=u32 BE block length`) must be re-summed after the patch or `locationd` reads a truncated body.
+
 ## Contributing
 
 This repository uses GitHub Issues as the only assignable work units, integrated through dedicated branches, path leases, reproducible handoffs, and cross-role reviews. Before committing:
@@ -314,15 +324,15 @@ Detailed collaboration: [Multi-agent workflow](docs/MULTI_AGENT_WORKFLOW.md).
 
 ## Star growth
 
-[![Star History](https://cdn.jsdelivr.net/gh/smthdagg/wificalling-location-gateway@star-chart/docs/images/star-history.svg?v=2)](https://github.com/smthdagg/wificalling-location-gateway/stargazers)
+![Star History](https://cdn.jsdelivr.net/gh/smthdagg/wificalling-location-gateway@star-chart/docs/images/star-history.svg)
 
-> The chart is regenerated daily by the `star-history-chart` workflow (or manually from the Actions tab): it reads the official star timeline with GitHub's auto-injected token and renders the SVG locally — the token is never written to any repository file and no third-party service is involved. `main` is branch-protected and the chart lives on the `star-chart` branch, embedded via the jsDelivr CDN; stars earned before GitHub exposed the timeline (the initial period) do not appear.
+> The chart is regenerated daily by the `star-history-chart` workflow (or manually from the Actions tab). It uses GitHub's auto-injected `GITHUB_TOKEN` to read the star timeline and renders the SVG locally — the token never leaves GitHub's workflow environment and is never written to any repository file or third-party service. The chart lives on the `star-chart` branch and is embedded via the jsDelivr CDN.
 
 If this project helps your OpenWrt / Wi‑Fi Calling experiments, a Star, a reproducible bug report, or a note in the [LINUX.DO](https://linux.do/) community is welcome. Please never publish personal locations, certificates, or proxy credentials in public content.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE). Third-party dependencies and external projects remain under their own licenses; the MIT grant does not change the isolation requirements for external AGPL implementation material defined in the [clean-room boundary ADR](docs/adr/0001-license-boundary.md).
+This project's own code is licensed under the [MIT License](LICENSE). Lite release assets also contain sing-box under GPL-3.0-or-later; third-party components retain their own licenses. The MIT grant does not change the isolation requirements for external AGPL implementation material defined in the [clean-room boundary ADR](docs/adr/0001-license-boundary.md).
 
 The Wi‑Fi Calling Gateway component was originally a separate project. This repository integrates it as a single installable package; formal builds accept only published IPKs validated by identity, version, and SHA-256.
 
@@ -360,7 +370,8 @@ Wi‑Fi Calling Location Gateway 将两个原本分离的流程组织在同一�
 ## 工作原理
 
 ```mermaid
-flowchart LR
+%%{init: {"flowchart": {"toolbar": false}}}%%
+flowchart TD
     I["授权测试 iPhone"] -->|"Wi‑Fi Calling · UDP 500/4500"| G["Wi‑Fi Calling Gateway"]
     G --> N["绑定的 sing-box 节点"]
     I -->|"Apple WLOC · TCP 443"| D["精确 DNS / nftables 隔离"]
@@ -402,34 +413,33 @@ flowchart LR
 
 | 平台 | 架构 | 包管理器 | 当前证据 | 状态 |
 |---|---:|---|---|---|
-| Redmi AX6S · ImmortalWrt 24.10.6 | MediaTek MT7622 / AArch64 | opkg | 官方 AArch64 OpenWrt 24.10.5 Docker 安装/启动矩阵；另有实机 procd、LuCI、自动/手动切换、证书和 iPhone WLOC 链路 | **Docker + 真机通过** |
+| Redmi AX6S · ImmortalWrt 24.10.6 | MediaTek MT7622 / AArch64 | opkg | r5 Lite 原包已安装并冷启动；overlay 剩余 20.4 MB；WCG/WLOC、tmpfs sing-box、nftables 与配置哈希通过；已实际收到并处理 iPhone WLOC 请求 | **Docker + 路由器 + iPhone WLOC 通过** |
 | OpenWrt 24.10.8 | x86_64 | opkg / IPK | Docker 中启动 init/ubus、安装集成包、启动服务、Socket 与 v1 状态检查 | **安装矩阵通过** |
 | iStoreOS 24.10.5 | x86_64 | opkg / IPK | 同上 | **安装矩阵通过** |
 | OpenWrt 25.12.3 | x86_64 | apk / APK v3 | 同上，使用原生 APK v3，非改名 IPK | **安装矩阵通过** |
 | 其他 OpenWrt / ImmortalWrt 版本或 CPU | — | — | 尚无对应设备/SDK证据 | **未验证** |
 
-运行时包包含 Rust ELF，**必须与路由器 CPU 架构一致**；LuCI 包才是 `all`/`noarch`。x86_64 包由固定 SDK 构建，AX6S 使用单独的 AArch64 `cortex-a53` 交叉构建链；正式 Docker 矩阵会安装全部三个发布资产。Docker 验证的是安装与启动，不等同于 nftables、DNS、真实运营商或 iPhone 端到端测试。
+运行时包包含与架构相关的 ELF，**必须与路由器 CPU 架构一致**。x86_64 使用固定 SDK，AX6S 使用 AArch64 `cortex-a53` 工具链。正式矩阵覆盖三类目标的 Standard/Lite 两种规格，共六个资产、八个运行用例；AX6S 另有真机与 iPhone WLOC 证据。
 
 ## 安装
 
 ### 前置条件
 
-- sing-box、firewall4/nftables、LuCI 与 rpcd 可用。
+- firewall4/nftables、LuCI 与 rpcd 可用；Standard 还要求固件/软件源提供 sing-box，Lite 自带运行时。
 - 为测试 iPhone 建立固定 DHCP 地址，并在 Gateway 中绑定正确节点。
 - 已备份路由器配置；手机上的 WARP、Shadowrocket 或其他 VPN 在路由器 WLOC 测试期间保持关闭。
 - 只在专用测试设备上安装本项目 CA，并核对证书指纹。
 
 ### 1. 选择正确的安装包
 
-Redmi AX6S 使用单一的架构专用集成包：
+`v1.3.0-r1` 为三个目标各提供 Standard 与 Lite 两种安装规格。它们属于同一个项目，WCG、WLOC、控制工具、LuCI 与 UCI 数据结构完全一致：
 
-- `wificalling-location-gateway_<版本>_aarch64_cortex-a53.ipk`
+- Standard：`wificalling-location-gateway_1.3.0-r1_aarch64_cortex-a53.ipk`、`wificalling-location-gateway_1.3.0-r1_x86_64.ipk`、`wificalling-location-gateway-1.3.0-r1.apk`
+- Lite：`wificalling-location-gateway-lite_1.3.0-r1_aarch64_cortex-a53.ipk`、`wificalling-location-gateway-lite_1.3.0-r1_x86_64.ipk`、`wificalling-location-gateway-lite_1.3.0-r1.apk`
 
-该包内含 Wi‑Fi Calling Gateway、WLOC 服务、控制工具和统一 LuCI，不依赖另行安装 `luci-app-wificalling-gateway` 或 `wloc-service`。重新安装或升级时，opkg 会保留 `/etc/config/wificalling-gateway` 与 `/etc/config/wloc-service`。
+固件已有合适 `/usr/bin/sing-box` 时选择 **Standard**；AX6S 等受限设备推荐 **Lite**：flash 只保存带 SHA256 固定的压缩运行时，首次调用透明解压一份到 `/tmp`，并为 WCG 应用已验证的 24 MiB 堆上限。两种规格故意互斥，不能同时安装；两者都保留 `/etc/config/wificalling-gateway` 与 `/etc/config/wloc-service`。
 
-正式版 1.0 对每个平台只提供一个完整集成包。包名统一为
-`wificalling-location-gateway`，内含 Wi‑Fi Calling Gateway、WLOC
-服务、控制工具和统一 LuCI；不再要求用户分别安装组件包。
+Lite 后缀只表示运行时所有权与内存策略不同，不是新项目，也不会恢复拆分组件安装。
 
 两种安装方式：
 
@@ -453,24 +463,25 @@ opkg update && opkg install wificalling-location-gateway
 [feed 仓库](https://github.com/smthdagg/wificalling-location-gateway-feed)（含
 OpenWrt 25.x 的 `.apk` 手动安装命令）。
 
-### 2. Redmi AX6S（单一集成 IPK）
+### 2. Redmi AX6S（推荐 Lite）
 
 ```sh
-opkg install /tmp/wificalling-location-gateway_<版本>_aarch64_cortex-a53.ipk
+opkg install /tmp/wificalling-location-gateway-lite_1.3.0-r1_aarch64_cortex-a53.ipk
 ```
 
-不要先执行 `opkg remove`；直接安装即可恢复缺失组件并保留现有配置。安装后按“验证服务”一节检查两个服务。
+安装前先备份两份 UCI 配置。AX6S 空间不足时，先停止服务并卸载旧整合包和旧 sing-box 包，再安装 Lite；不要删除 UCI 配置。r5 Lite 会替代独立 sing-box 包并拥有透明启动包装器。
 
 ### 3. OpenWrt 24.10 / iStoreOS 24.10（IPK）
 
 ```sh
-opkg install /tmp/wificalling-location-gateway_1.2.2-r1_x86_64.ipk
+opkg install /tmp/wificalling-location-gateway_1.3.0-r1_x86_64.ipk
+# 需要内置、受限运行时时也可选择对应 Lite 文件。
 ```
 
 ### 4. OpenWrt 25.12（原生 APK v3）
 
 ```sh
-apk add --allow-untrusted /tmp/wificalling-location-gateway-1.2.2-r1.apk
+apk add --allow-untrusted /tmp/wificalling-location-gateway-1.3.0-r1.apk
 ```
 
 `--allow-untrusted` 仅适用于当前未接入软件源签名的本地构建包。正式软件源发布应使用仓库签名，且不能把 IPK 重命名为 APK。
@@ -532,12 +543,12 @@ OPENWRT_CROSS_CACHE_DIR=/tmp/wloc-rust-openwrt \
   --out-dir "$PWD/dist/runtime/x86_64"
 
 ./scripts/openwrt/build-release-packages.sh \
-  --version 1.2.2 \
-  --release 1 \
+  --version 1.3.0 \
+  --release 4 \
   --arch x86_64 \
   --service-bin "$PWD/dist/runtime/x86_64/wloc-service" \
   --ctl-bin "$PWD/dist/runtime/x86_64/wloc-ctl" \
-  --gateway-ipk /absolute/path/luci-app-wificalling-gateway_<version>_all.ipk \
+  --gateway-ipk /absolute/path/wificalling-location-gateway_1.3.0-r1_aarch64_cortex-a53.ipk \
   --gateway-sha256 <verified-sha256> \
   --out-dir "$PWD/dist/openwrt-release"
 ```
@@ -546,7 +557,7 @@ OPENWRT_CROSS_CACHE_DIR=/tmp/wloc-rust-openwrt \
 
 ```sh
 ./scripts/openwrt/verify-docker-matrix.sh \
-  --dist-dir "$PWD/dist/v1.2.2"
+  --dist-dir "$PWD/dist/wloc-openwrt-release-r4"
 ```
 
 构建使用固定摘要的官方 OpenWrt SDK；依赖准备之后，产品编译采用 locked/offline、只读源码和禁网容器。完整边界和结果见 [OpenWrt 发布打包与 Docker 矩阵](docs/testing/OPENWRT_PACKAGE_DOCKER_MATRIX.md)。
@@ -588,7 +599,15 @@ docs/                        API、安全、部署、测试和双语用户教程
 - 停用时先撤销 WLOC 重定向，再排空并停止服务；恢复前应确认独立 nftables 规则已消失。
 - 删除 iPhone 上的 `wloc-service root CA` 描述文件即可撤销设备信任；重新生成 CA 后必须重新核对并安装新指纹。
 
-漏洞请按 [SECURITY.md](SECURITY.md) 私下报告，不要在公开 Issue 中粘贴证书、IP、节点配置或设备信息。
+漏洞请按 [SECURITY.md](SECURITY.md) 私下报告，并向公开 Issue 中贴证书、IP、节点配置或设备信息。
+
+## 注意事项
+
+以下条目来自上面的工作原理（设备 → TPROXY 拦截 → wloc 中间人 → Apple WLOC），均为实测踩坑，而非理论。
+
+- **与 PassWall 共存。** 本插件使用独立的 `inet wificalling_gateway` 表，以及独立的 `fwmark 0x66 → table 166` TPROXY 回环路径，与 PassWall 隔离。PassWall 在 `inet passwall`（`PSW_MANGLE` / `PSW_NAT`）上做全局 TPROXY，否则会在本插件之前抢走测试设备的流量。`passwall-bypass.sh` 因此会为每个已绑定测试设备 IP 在 PassWall 链中插入一条 `return` 规则（`WFC_GATEWAY_BYPASS`）。若该旁路缺失或过旧，设备的 Apple 443 流量会被 PassWall 静默截走，WLOC 拦截根本不触发——插件看似已装，实则不工作。设备集合变化时务必重新执行旁路。
+- **wloc → Apple 的 TPROXY 回环。** WLOC 服务自身以客户端身份访问 `gs-loc.apple.com`。它的出站握手复用同一套 TPROXY 机制（`ip rule fwmark 0x66 lookup 166`、`ip route local 0.0.0.0/0 dev lo table 166`）。若该 mark、路由表或 `apple_hosts` 集合写错，服务自身的出站握手会被自己的重定向规则捕获并回环——表现为“设备能连到 wloc 服务器，但 wloc 与 Apple 握手失败”。遇到“设备到服务端正常、服务端到 Apple 不通”这类症状，先查 nftables 回环路径与 `apple_hosts`，别急着怀疑 DNS 或节点。
+- **wloc → Apple 响应重写。** 即便握手正常，Apple 仍会拒绝代理后的 WLOC 响应，除非重写精确（见 `issue-17`）：重复的 `Content-Length` 会让 Apple 返回 `400 Bad Request`；未强制 `Accept-Encoding: identity` 的响应会以 gzip 压缩返回、无法重写；且 10 字节不透明头帧（`[0:2]=0x0001`、`[6:10]=u32 BE block length`）在补丁后必须重算长度，否则 `locationd` 读到截断的 body。
 
 ## 参与开发
 
@@ -604,14 +623,14 @@ docs/                        API、安全、部署、测试和双语用户教程
 
 ## Star 增长
 
-[![Star History](https://cdn.jsdelivr.net/gh/smthdagg/wificalling-location-gateway@star-chart/docs/images/star-history.svg?v=2)](https://github.com/smthdagg/wificalling-location-gateway/stargazers)
+![Star History](https://cdn.jsdelivr.net/gh/smthdagg/wificalling-location-gateway@star-chart/docs/images/star-history.svg)
 
-> 图表由 `star-history-chart` 工作流每日自动更新（也可在 Actions 页面手动运行）：用 GitHub 自动注入的 token 读取官方 star 时间线并本地生成 SVG，token 不写入仓库任何文件，也不经过第三方服务。main 受分支保护，图表发布在 `star-chart` 分支并经 jsDelivr CDN 嵌入；首次生成前的 star 历史（GitHub 未开放时间线访问的时期）不会出现在图中。
+> 图表由 `star-history-chart` 工作流每日自动更新（也可在 Actions 页面手动运行）。它使用 GitHub 自动注入的 `GITHUB_TOKEN` 读取 star 时间线并在本地生成 SVG——token 只在 GitHub 的工作流环境内使用，不写入仓库任何文件，也不经过第三方服务。图表发布在 `star-chart` 分支，经 jsDelivr CDN 嵌入。
 
 如果这个项目对你的 OpenWrt / Wi‑Fi Calling 实验有帮助，欢迎 Star、提交可复现的问题报告，或在 [LINUX.DO](https://linux.do/) 社区交流使用经验。请勿在公开内容中发布个人位置、证书或代理凭据。
 
 ## 开源许可
 
-本项目采用 [MIT License](LICENSE)。第三方依赖及外部项目仍分别遵循其自身许可证；MIT 授权不改变 [clean-room 边界 ADR](docs/adr/0001-license-boundary.md) 中对外部 AGPL 实现材料的隔离要求。
+本项目自有代码采用 [MIT License](LICENSE)。Lite 发布资产还内含采用 GPL-3.0-or-later 的 sing-box；第三方组件继续遵循各自许可证。MIT 授权不改变 [clean-room 边界 ADR](docs/adr/0001-license-boundary.md) 对外部 AGPL 实现材料的隔离要求。
 
 Wi‑Fi Calling Gateway 组件原为独立项目。本仓库将其整合为单一安装包；正式包构建只接受经过身份、版本和 SHA-256 校验的已发布 IPK。

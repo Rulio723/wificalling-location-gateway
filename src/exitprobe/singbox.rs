@@ -289,9 +289,6 @@ pub struct SingBoxProbe {
     /// the bound node for devices that have no route rule (e.g. disabled
     /// Wi-Fi Calling policies), so follow-device still probes their node.
     uci_config_path: PathBuf,
-    /// When true, an explicit device binding is required. A missing binding
-    /// must not silently fall back to an unrelated outbound.
-    require_device_binding: bool,
 }
 
 impl SingBoxProbe {
@@ -309,16 +306,7 @@ impl SingBoxProbe {
             timeout: Duration::from_secs(15),
             singbox_bin: "/usr/bin/sing-box".to_owned(),
             uci_config_path: PathBuf::from("/etc/config/wificalling-gateway"),
-            require_device_binding: false,
         }
-    }
-
-    /// Require a matching Gateway policy for this probe target. This is used
-    /// by the profile-driven daemon; legacy callers may retain the historical
-    /// fallback behavior unless they opt in.
-    pub fn with_required_device_binding(mut self) -> Self {
-        self.require_device_binding = true;
-        self
     }
 
     /// Read the Gateway config and select the outbound for the test device.
@@ -335,19 +323,19 @@ impl SingBoxProbe {
         //    which the Gateway compiler names `wg-<section>` (sing-box
         //    1.11+), while the UCI binding resolves to `node-<section>`.
         let uci_text = std::fs::read_to_string(&self.uci_config_path).ok();
-        let selected_tag = if self.require_device_binding {
-            // A profile-bound probe must never trust a generated route rule
-            // as a substitute for the Gateway's device policy. Route rules
-            // can be stale or orphaned after a node switch; accepting one
-            // here would let the probe follow a different device/node than
-            // the profile explicitly selected.
-            uci_text
-                .as_deref()
-                .and_then(|text| device_bound_node_tag(text, self.device_ip))
+        let selected_tag = if let Some(uci_text) = uci_text.as_deref() {
+            // A readable UCI file is authoritative. If the followed device
+            // or its bound node was deleted, a stale sing-box route must not
+            // resurrect it and an unrelated first node must never be used.
+            device_bound_node_tag(uci_text, self.device_ip).ok_or(ProbeFailure::BoundNodeMissing)?
         } else {
-            select_node_tag(&document, uci_text.as_deref(), self.device_ip)
+            // Compatibility for pre-UCI/test environments: the running route
+            // may identify the device, but absence still fails closed.
+            select_outbound_tag(&document, self.device_ip).ok_or(ProbeFailure::BoundNodeMissing)?
         };
-        if let Some(tag) = selected_tag {
+
+        {
+            let tag = selected_tag;
             if config.outbounds.iter().any(|o| o.tag == tag) {
                 return Ok(tag);
             }
@@ -361,24 +349,7 @@ impl SingBoxProbe {
                 return Ok(tag);
             }
         }
-        if self.require_device_binding {
-            return Err(ProbeFailure::Unreachable);
-        }
-        // 2. Fall back to the first non-direct outbound, then the first
-        //    wireguard endpoint (a gateway with only wg nodes has no usable
-        //    outbound for the follow-device probe).
-        config
-            .outbounds
-            .iter()
-            .find(|outbound| outbound.tag != "direct")
-            .map(|outbound| outbound.tag.clone())
-            .or_else(|| {
-                config
-                    .endpoints
-                    .first()
-                    .map(|endpoint| endpoint.tag.clone())
-            })
-            .ok_or(ProbeFailure::Unreachable)
+        Err(ProbeFailure::BoundNodeMissing)
     }
 
     /// Probe the node's real exit IP through a temporary sing-box instance.
@@ -676,72 +647,6 @@ mod tests {
     }
 
     #[test]
-    fn required_device_binding_never_falls_back_to_another_outbound() {
-        let doc = json!({"outbounds": [
-            {"type": "hysteria2", "tag": "node-a"},
-            {"type": "direct", "tag": "direct"}
-        ]});
-        let dir = std::env::temp_dir();
-        let config_path = dir.join("wloc-singbox-required-binding.json");
-        let uci_path = dir.join("wloc-singbox-required-binding-uci");
-        std::fs::write(&config_path, doc.to_string()).unwrap();
-        std::fs::write(
-            &uci_path,
-            "config device\n\tlist source_ip '192.168.31.177'\n",
-        )
-        .unwrap();
-        let mut probe = SingBoxProbe::new(
-            config_path.clone(),
-            IpAddr::V4(Ipv4Addr::new(192, 168, 31, 176)),
-            18080,
-            dir.join("wloc-singbox-required-binding-work"),
-        )
-        .with_required_device_binding();
-        probe.uci_config_path = uci_path.clone();
-        assert_eq!(probe.load_outbound_tag(), Err(ProbeFailure::Unreachable));
-        std::fs::remove_file(&config_path).unwrap();
-        std::fs::remove_file(&uci_path).unwrap();
-        let _ = std::fs::remove_dir_all(dir.join("wloc-singbox-required-binding-work"));
-    }
-
-    #[test]
-    fn required_device_binding_rejects_route_only_match() {
-        // A stale generated route rule can still point this device at an
-        // outbound even when Gateway UCI has no matching device policy. A
-        // profile-bound probe must reject that route-only match.
-        let doc = json!({
-            "outbounds": [
-                {"type": "hysteria2", "tag": "node-a"},
-                {"type": "direct", "tag": "direct"}
-            ],
-            "route": {"rules": [
-                {"source_ip_cidr": ["192.168.31.176/32"], "action": "route", "outbound": "node-a"}
-            ]}
-        });
-        let dir = std::env::temp_dir();
-        let config_path = dir.join("wloc-singbox-required-route-only.json");
-        let uci_path = dir.join("wloc-singbox-required-route-only-uci");
-        std::fs::write(&config_path, doc.to_string()).unwrap();
-        std::fs::write(
-            &uci_path,
-            "config device\n\tlist source_ip '192.168.31.177'\n",
-        )
-        .unwrap();
-        let mut probe = SingBoxProbe::new(
-            config_path.clone(),
-            IpAddr::V4(Ipv4Addr::new(192, 168, 31, 176)),
-            18080,
-            dir.join("wloc-singbox-required-route-only-work"),
-        )
-        .with_required_device_binding();
-        probe.uci_config_path = uci_path.clone();
-        assert_eq!(probe.load_outbound_tag(), Err(ProbeFailure::Unreachable));
-        std::fs::remove_file(&config_path).unwrap();
-        std::fs::remove_file(&uci_path).unwrap();
-        let _ = std::fs::remove_dir_all(dir.join("wloc-singbox-required-route-only-work"));
-    }
-
-    #[test]
     fn query_exit_ip_fails_when_the_proxy_is_down() {
         // No listener on this port; the curl command fails -> Unreachable.
         assert_eq!(
@@ -912,6 +817,79 @@ config device
     }
 
     #[test]
+    fn deleted_bound_node_never_falls_back_to_an_unrelated_outbound() {
+        let doc = json!({"outbounds": [
+            {"type": "vmess", "tag": "node-unrelated"},
+            {"type": "direct", "tag": "direct"}
+        ]});
+        let dir = std::env::temp_dir();
+        let suffix = std::process::id();
+        let config_path = dir.join(format!("wloc-deleted-node-{suffix}.json"));
+        let uci_path = dir.join(format!("wloc-deleted-node-{suffix}.uci"));
+        std::fs::write(&config_path, doc.to_string()).unwrap();
+        std::fs::write(
+            &uci_path,
+            "config device\n\toption node 'deleted'\n\tlist source_ip '192.168.31.175'\n",
+        )
+        .unwrap();
+        let mut probe = SingBoxProbe::new(
+            config_path.clone(),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 31, 175)),
+            18_083,
+            dir.join(format!("wloc-deleted-node-work-{suffix}")),
+        );
+        probe.uci_config_path = uci_path.clone();
+
+        assert_eq!(
+            probe.load_outbound_tag(),
+            Err(ProbeFailure::BoundNodeMissing)
+        );
+
+        std::fs::remove_file(config_path).unwrap();
+        std::fs::remove_file(uci_path).unwrap();
+    }
+
+    #[test]
+    fn deleted_device_policy_never_uses_a_stale_runtime_route() {
+        let doc = json!({
+            "outbounds": [
+                {"type": "vmess", "tag": "node-stale"},
+                {"type": "direct", "tag": "direct"}
+            ],
+            "route": {"rules": [{
+                "source_ip_cidr": ["192.168.31.175/32"],
+                "action": "route",
+                "outbound": "node-stale"
+            }]}
+        });
+        let dir = std::env::temp_dir();
+        let suffix = std::process::id();
+        let config_path = dir.join(format!("wloc-deleted-device-{suffix}.json"));
+        let uci_path = dir.join(format!("wloc-deleted-device-{suffix}.uci"));
+        std::fs::write(&config_path, doc.to_string()).unwrap();
+        std::fs::write(
+            &uci_path,
+            "config device\n\toption node 'other'\n\tlist source_ip '192.168.31.176'\n",
+        )
+        .unwrap();
+        let mut probe = SingBoxProbe::new(
+            config_path.clone(),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 31, 175)),
+            18_084,
+            dir.join(format!("wloc-deleted-device-work-{suffix}")),
+        );
+        probe.uci_config_path = uci_path.clone();
+
+        assert_eq!(
+            probe.load_outbound_tag(),
+            Err(ProbeFailure::BoundNodeMissing)
+        );
+
+        std::fs::remove_file(config_path).unwrap();
+        std::fs::remove_file(uci_path).unwrap();
+    }
+
+    #[test]
     fn probe_does_not_hang_when_singbox_stderr_stays_open() {
         use std::time::Instant;
         // A probe child that keeps writing to stderr but never exits must
@@ -921,7 +899,7 @@ config device
         let fake_bin = dir.join("wloc-fake-singbox.sh");
         std::fs::write(
             &fake_bin,
-            "#!/bin/sh\nprintf '%s\\n' 'lookup bad-node.invalid: empty result' >&2\nexec sleep 30\n",
+            "#!/bin/sh\nwhile true; do echo 'lookup bad-node.invalid: empty result' >&2; sleep 1; done\n",
         )
         .unwrap();
         let mut perms = std::fs::metadata(&fake_bin).unwrap().permissions();

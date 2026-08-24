@@ -49,7 +49,7 @@ function sourceLabel(v) {
 	return v === 'manual' ? wlocI18n.t('Manual') : (v === 'auto' ? wlocI18n.t('Auto') : (v || '-'));
 }
 
-		function eventLabel(v) {
+function eventLabel(v) {
 	switch (v) {
 		case 'target_updated': return wlocI18n.t('Target updated');
 		case 'rewritten': return wlocI18n.t('WLOC response rewritten');
@@ -85,9 +85,10 @@ return view.extend({
 				title: wlocI18n.t('Re-probe the followed node exit IP now'),
 				click: function() {
 					if (refreshingIp) return;
+					var previousIp = status.exit && status.exit.ip ? status.exit.ip : null;
 					refreshingIp = true;
 					renderGeo(status);
-					callCtl('refresh', null, null, null).then(function() {
+					return callCtl('refresh', null, null, null).then(function() {
 						// The daemon re-probes and rewrites status.json
 						// before replying; read it once so the rows update
 						// immediately instead of on the next poll tick.
@@ -96,11 +97,22 @@ return view.extend({
 						var fresh;
 						try { fresh = JSON.parse(text); } catch (e) { fresh = status; }
 						refreshingIp = false;
+						status = fresh;
 						renderGeo(fresh);
+						var nextExit = fresh.exit || {};
+						if (!nextExit.ip) {
+							ui.addNotification(null, E('p', {}, wlocI18n.t('IP refresh failed: ') +
+								(nextExit.last_error ? wlocI18n.t(nextExit.last_error) : wlocI18n.t('Exit IP unavailable'))), 'error');
+						} else if (nextExit.ip === previousIp) {
+							ui.addNotification(null, E('p', {}, wlocI18n.t('IP refreshed; exit unchanged: ') + nextExit.ip), 'info');
+						} else {
+							ui.addNotification(null, E('p', {}, wlocI18n.t('Exit IP updated: ') +
+								(previousIp || '-') + ' → ' + nextExit.ip), 'info');
+						}
 					}).catch(function(err) {
 						refreshingIp = false;
 						renderGeo(status);
-						ui.addNotification(null, E('p', {}, wlocI18n.t('IP refresh failed: ') + ' ' + (err.message || err)), 'error');
+						ui.addNotification(null, E('p', {}, wlocI18n.t('IP refresh failed: ') + (err.message || err)), 'error');
 					});
 				}
 			}, label);
@@ -155,17 +167,18 @@ return view.extend({
 			});
 			return rows.slice(-20).reverse();
 		}
-		function eventTime(event) { return event.timestamp || event.time; }
 		function logRows(events) {
 			return events.map(function(ev) {
-				var fields = ev.fields || {};
-				var where = fields.city || fields.country_code
-					? (fields.city || '') + (fields.country_code ? ' (' + fields.country_code + ')' : '') : '-';
+				var where = '-';
+				if (ev.city || ev.country_code)
+					where = (ev.city || '') + (ev.country_code ? ' (' + ev.country_code + ')' : '');
+				else if (ev.latitude != null && ev.longitude != null)
+					where = ev.latitude.toFixed(4) + ', ' + ev.longitude.toFixed(4);
 				return E('tr', { class: 'tr' }, [
-					E('td', { class: 'td' }, fmtTime(eventTime(ev))),
-					E('td', { class: 'td' }, eventLabel(ev.event_code || ev.type)),
+					E('td', { class: 'td' }, fmtTime(ev.time)),
+					E('td', { class: 'td' }, eventLabel(ev.type)),
 					E('td', { class: 'td' }, where),
-					E('td', { class: 'td' }, sourceLabel(fields.source || ev.source))
+					E('td', { class: 'td' }, sourceLabel(ev.source))
 				]);
 			});
 		}

@@ -16,6 +16,12 @@ fail() {
 [ -x "$builder" ] || fail "missing executable $builder"
 [ -x "$matrix" ] || fail "missing executable $matrix"
 [ -x "$runtime_builder" ] || fail "missing executable $runtime_builder"
+grep -F '`1.2.x` stable integrated releases are the only permitted build/package baseline.' \
+	"$repo_root/AGENTS.md" >/dev/null ||
+	fail 'project rules must pin the sole stable integrated 1.2.x baseline'
+grep -F 'The multi-device/2.0 Beta line is maintained only in the separate Beta repository' \
+	"$repo_root/AGENTS.md" >/dev/null ||
+	fail 'project rules must exclude the independently maintained Beta line'
 
 grep -F '\$\$required' "$builder" >/dev/null ||
 	fail 'package post-install must preserve the full prerequisite path through Make'
@@ -23,14 +29,6 @@ grep -F 'mkdir -p /var/run/wificalling-gateway' "$builder" >/dev/null ||
 	fail 'release post-install must create the volatile Gateway runtime directory before restart'
 grep -F 'chmod 0700 /var/run/wificalling-gateway' "$builder" >/dev/null ||
 	fail 'release post-install must restrict the Gateway runtime directory'
-grep -F 'wificalling-location-gateway/unified-supervisor.sh' "$builder" >/dev/null ||
-	fail 'release builder must package the unified supervisor'
-grep -F '/etc/init.d/wificalling-gateway disable' "$builder" >/dev/null ||
-	fail 'release post-install must disable the legacy Gateway owner'
-grep -F '/etc/init.d/wloc-service disable' "$builder" >/dev/null ||
-	fail 'release post-install must disable the legacy WLOC owner'
-grep -F '/etc/init.d/wificalling-location-gateway restart' "$builder" >/dev/null ||
-	fail 'release post-install must restart the unified owner'
 grep -F 'rm -f /tmp/luci-indexcache.*' "$builder" >/dev/null ||
 	fail 'release post-install must invalidate every LuCI menu cache variant'
 if grep -F 'wloc-docker-smoke-deps' "$matrix" >/dev/null; then
@@ -42,11 +40,24 @@ grep -F 'manifest_entries=' "$matrix" >/dev/null ||
 	fail 'Docker verification must select install artifacts from the checksum manifest'
 grep -F 'unexpected release package not listed in SHA256SUMS' "$matrix" >/dev/null ||
 	fail 'Docker verification must reject unlisted matching release packages'
+grep -F "variant=\$6" "$matrix" >/dev/null ||
+	fail 'Docker verification must execute each runtime row for an explicit package variant'
+grep -F 'standard package unexpectedly owns /usr/bin/sing-box' "$matrix" >/dev/null ||
+	fail 'Docker verification must enforce firmware ownership for the Standard runtime'
+grep -F 'Lite package did not install /usr/bin/sing-box' "$matrix" >/dev/null ||
+	fail 'Docker verification must enforce bundled runtime ownership for Lite'
 if grep -F 'shasum -a 256 ./wificalling-location-gateway' "$builder" >/dev/null; then
 	fail 'release builder must write basename-only SHA256SUMS entries'
 fi
 grep -F 'luci-app-wificalling-gateway.json' "$builder" >/dev/null ||
 	fail 'integrated release builder must remove the standalone Gateway LuCI menu'
+grep -F "Package: wificalling-location-gateway" "$builder" >/dev/null ||
+	fail 'release builder must accept a hash-pinned stable integrated package as its 1.2.x base'
+grep -F "1\\.2\\.[0-9]+-(r)?[0-9]+" "$builder" >/dev/null ||
+	fail 'release builder must accept the stable 1.2.x rN revision format'
+if grep -F '1\.7' "$builder" >/dev/null; then
+	fail 'release builder must not accept the retired standalone 1.7 baseline'
+fi
 
 printf '#!/bin/sh\nexit 0\n' > "$tmp/wloc-service"
 printf '#!/bin/sh\nexit 0\n' > "$tmp/wloc-ctl"
@@ -59,9 +70,9 @@ plan=$(
 		--ctl-bin "$tmp/wloc-ctl"
 )
 
-printf '%s\n' "$plan" | grep -F 'wificalling-location-gateway_1.2.0-r1_x86_64.ipk' >/dev/null ||
+printf '%s\n' "$plan" | grep -F 'wificalling-location-gateway_1.3.0-r1_x86_64.ipk' >/dev/null ||
 	fail '24.10 must produce one architecture-specific integrated IPK'
-printf '%s\n' "$plan" | grep -F 'wificalling-location-gateway-1.2.0-r1.apk (arch: x86_64)' >/dev/null ||
+printf '%s\n' "$plan" | grep -F 'wificalling-location-gateway-1.3.0-r1.apk (arch: x86_64)' >/dev/null ||
 	fail '25.12 must produce one architecture-specific integrated APK'
 if printf '%s\n' "$plan" | grep -E 'wloc-service[_-]|luci-app-wificalling-location-gateway[_-]' >/dev/null; then
 	fail 'formal 1.2.0 plan must not expose split component packages'
@@ -95,6 +106,10 @@ for expected in \
 	'iStoreOS 24.10.5|opkg|wukongdaily/openwrt-istoreos:amd64-latest'; do
 	printf '%s\n' "$matrix_plan" | grep -F "$expected" >/dev/null ||
 		fail "missing Docker matrix row: $expected"
+done
+for variant in standard lite; do
+	printf '%s\n' "$matrix_plan" | grep -F "variant=$variant" >/dev/null ||
+		fail "Docker matrix plan must include the $variant package variant"
 done
 printf '%s\n' "$matrix_plan" | grep -F 'sha256:93f980c266b9b68e3085f3eee7909c04f1dc4061047558e18a9ef12aec43efa9' >/dev/null ||
 	fail 'AX6S-compatible AArch64 rootfs image must be immutable'

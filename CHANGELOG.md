@@ -2,6 +2,136 @@
 
 All notable changes are documented here. Versions follow Semantic Versioning.
 
+## [1.3.0-r1] - 2026-08-24
+
+Bump the release line to 1.3.0-r1. Carries the Standard/Lite packaging and
+three-platform (x86_64 / AX6S / 25.12 apk) release work already on `main`.
+
+- Version sources aligned to 1.3.0: `VERSION`, `Cargo.toml`, both `openwrt/*/Makefile`
+  files, `scripts/build-luci-ipk.sh`, and `build-release-packages.sh` default.
+- Release assertion tests updated to expect the 1.3.0-r1 package names.
+
+## [1.2.2-r5] - 2026-08-23
+
+Same-project Standard/Lite packaging and the AX6S low-memory release profile.
+
+### Added and changed
+
+- Every supported target now has two complete integrated assets. **Standard**
+  uses the firmware/feed `/usr/bin/sing-box`; **Lite** owns a pinned bundled
+  runtime. They share the same WCG/WLOC implementation, LuCI, UCI schema and
+  release line and intentionally conflict at package-manager level.
+- Lite stores sing-box as a gzip payload in persistent storage. A transparent
+  wrapper verifies its SHA-256 and expands one shared executable into tmpfs on
+  first use, so WCG and PassWall can reuse it without a second flash copy.
+- The AX6S Lite WCG process applies the validated `GOMAXPROCS=1`,
+  `GOMEMLIMIT=24MiB`, and `GOGC=75` profile. Standard retains firmware defaults.
+- The release matrix now validates six assets across eight Standard/Lite
+  runtime cases, including native OpenWrt 25 APK dependency resolution and
+  package ownership of the sing-box executable contract.
+
+### Hardware verification
+
+- Removed the old integrated and sing-box packages before installing the exact
+  r5 Lite AArch64 asset on Redmi AX6S. Both UCI files retained identical
+  SHA-256 values across the migration.
+- Cold boot regenerated the verified sing-box 1.12.25 runtime in `/tmp`, left
+  about 20.4 MB free on overlay, started WCG and WLOC, restored the scoped
+  nftables rule for `192.168.31.175`, and kept WLOC health at `intercepting`.
+- A real iPhone request to `gs-loc.apple.com/clls/wloc` was observed after the
+  reboot and its WLOC payload was synthesized successfully.
+
+### 中文说明
+
+- 同一 1.2.x 项目为三个目标各提供 Standard 与 Lite 两种完整安装规格，共六个
+  资产；两者不是产品分支，也不拆分 WCG 与 WLOC。
+- Standard 调用固件/软件源的 sing-box；Lite 自带固定哈希的运行时，并通过透明
+  包装器把压缩文件解压到 `/tmp`。WCG 与 PassWall 共用一份 tmpfs 可执行文件。
+- AX6S Lite 使用 24 MiB WCG 堆上限；真机迁移和冷启动后 overlay 仍余约
+  20.4 MB，两份 UCI 配置哈希不变，WCG/WLOC 与 nftables 正常。
+- 冷启动后已实际捕获 iPhone12 的 WLOC 请求并成功生成定位响应；Standard/Lite
+  的八项 Docker 安装、启动、Socket 与状态矩阵全部通过。
+
+## [1.2.2-r4] - 2026-08-23
+
+Stable deleted-node fail-closed hotfix and release-baseline isolation.
+
+### Fixed
+
+- **No arbitrary node fallback**: auto-follow now requires the selected WCG
+  device and its bound node to exist in the current UCI configuration. A
+  deleted binding can no longer fall through to the first sing-box outbound,
+  endpoint, or a stale generated route.
+- **No stale location after binding loss**: when the followed node is missing,
+  the runtime clears the exit IP and Geo result and reports an actionable
+  error instead of retaining a previous country, city, or coordinate.
+- **Visible refresh result**: the WLOC monitor refresh action now waits for the
+  daemon result and reports changed, unchanged, or unavailable exit state.
+  The new messages and missing-node reason include Chinese translations.
+
+### Release boundary and verification
+
+- Both formal package builders now accept only SHA-256-pinned stable integrated
+  `wificalling-location-gateway` 1.2.x packages as their baseline. Retired
+  standalone package lines are rejected.
+- Project rules exclude the independently maintained multi-device/2.0 Beta
+  line from this repository. The IPK `debian-binary` value `2.0` remains only
+  as the required archive-format marker.
+- Built and verified the AX6S AArch64 IPK, OpenWrt/iStoreOS 24.x x86_64 IPK,
+  and OpenWrt 25.12 x86_64 native APK across four pinned rootfs environments.
+- Installed the exact AArch64 R4 asset on Redmi AX6S after removing R3 to fit
+  the constrained overlay. Both UCI files were preserved. A temporary missing
+  binding produced unavailable exit/Geo state with no unrelated fallback;
+  restoring the configuration returned the exit state to verified.
+
+### 中文说明
+
+- 修复自动跟随设备的原绑定节点被删除后，程序错误选择首个可用节点的问题。
+- 绑定节点不存在时立即清除旧出口 IP 与旧地理信息，并提示重新选择、应用 WCG
+  节点；刷新按钮现在明确显示出口已变化、未变化或不可用。
+- 正式构建基线严格限制为已校验哈希的 1.2.x 稳定整合包，拒绝 1.7 等退役独立包。
+- 多设备/2.0 Beta 已从本项目范围移除并由独立项目维护；IPK 内的 `2.0` 仅为包格式。
+- 三个平台包与四环境 Docker 矩阵通过，R4 已在 AX6S 按低存储流程安装并完成回归。
+
+## [1.2.2-r3] - 2026-08-23
+
+Stable runtime hotfix and completion of the three-platform release set.
+
+### Fixed
+
+- **Non-blocking TPROXY accept path**: the WLOC listener no longer blocks the
+  async runtime while accepting redirected connections. AX6S validation
+  completed five independent local TLS/HTTP2 WLOC requests with HTTP 200.
+- **Validated local WLOC response path**: authorized WLOC requests use the
+  configured local response path again instead of timing out before protocol
+  processing.
+- **Accurate upstream failure health**: upstream connection failures now reach
+  the proxy-health recorder instead of being hidden as a healthy state.
+- **Monitor temporary-file leak**: monitor updates no longer leave zero-byte
+  temporary files behind on the router.
+- **Stable integrated package input**: the release builder now accepts the
+  SHA-256-pinned `wificalling-location-gateway` 1.2.x package identity and the
+  `-rN` revision format. It still rejects unrelated package names and versions.
+
+### Packaging and verification
+
+- Published one integrated package per target: AX6S AArch64 IPK, OpenWrt /
+  iStoreOS 24.x x86_64 IPK, and OpenWrt 25.12 x86_64 native APK v3.
+- Passed install/start/socket/status checks in four pinned rootfs environments:
+  OpenWrt 24.10.5 AArch64, OpenWrt 24.10.8 x86_64, iStoreOS 24.10.5 x86_64,
+  and OpenWrt 25.12.3 x86_64.
+- Re-verified the release AArch64 package on a Redmi AX6S: WCG, sing-box, WLOC,
+  generated configuration, and the WLOC control socket were healthy; core
+  service PIDs remained stable during observation.
+
+### 中文说明
+
+- 修复 WLOC TPROXY 接收路径阻塞、上游失败状态遗漏和监控临时文件泄漏。
+- 恢复并验证本地 WLOC 响应链路；AX6S 上 5 次 TLS/HTTP2 请求均返回 HTTP 200。
+- 补齐 AX6S AArch64 IPK、OpenWrt/iStoreOS 24.x x86_64 IPK 与 OpenWrt 25.12
+  x86_64 原生 APK 三个平台安装包，并完成四环境 Docker 与 AX6S 真机验证。
+- 修复正式打包器，使其可直接校验并复用稳定整合包，不再依赖临时篡改包元数据。
+
 ## [1.2.2] - 2026-08-19
 
 Manual-mode exit-probe fix, compiler endpoint filtering, and LuCI follow-device logic corrections.
