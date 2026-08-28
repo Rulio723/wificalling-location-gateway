@@ -2,6 +2,81 @@
 
 All notable changes are documented here. Versions follow Semantic Versioning.
 
+## [1.3.0-r8] - 2026-08-28
+
+Standardized automatic WLOC location refresh after manual mode changes.
+
+- Switching from manual location back to automatic node-following now always
+  refreshes the exit IP and Geo target, including while the service is disabled.
+- Added regression coverage for the disabled-service transition and aligned the
+  three-platform package release metadata to r8.
+
+### 中文说明
+
+标准化手动定位与自动跟随定位的切换行为。
+
+- 从手动定位切回自动跟随时，无论服务当前是否启用，都会重新刷新出口 IP
+  与 Geo 目标，避免使用空目标或旧定位。
+- 增加 disabled 状态切换回归测试，并将三平台包发布元数据统一为 r8。
+
+## [1.3.0-r7] - 2026-08-28
+
+Node health and AX6S stability release. This release consolidates the r5/r6
+test packages and is the current three-platform release.
+
+- Reuse the one already-running WIFICalling Gateway sing-box for every node
+  quality test through dedicated loopback HTTP inbounds; no temporary
+  sing-box process or duplicate proxy configuration is created.
+- Report proxy-path reachability and total request latency for all protocols;
+  background checks run about every 30 seconds with a 60-second per-node
+  result cache, while `nodeTest` bypasses the cache for an immediate test.
+- Publish the monitor result to the LuCI-readable `/www/wloc-node-status.json`
+  file and bypass browser caching so refreshed LuCI pages show new metrics.
+- Keep AX6S Lite single-worker/moderate-GC operation without an artificial
+  heap ceiling; live AX6S verification confirmed five node metrics, one
+  WIFICalling sing-box process, and no new OOM event during the stability run.
+
+### 中文说明
+
+节点健康与 AX6S 稳定性版本。本版本合并 r5/r6 测试包的验证结果，作为当前三平台正式发布版本。
+
+- 所有节点质量测试统一复用正在运行的 WIFICalling Gateway sing-box，
+  通过专用回环 HTTP 入站探测，不再启动临时 sing-box 或重复代理配置。
+- 所有协议统一报告代理链路可达性与完整请求延迟；后台约每 30 秒检查一次，
+  单节点结果缓存 60 秒；`nodeTest` 会绕过缓存并立即测试。
+- 后台结果统一写入 LuCI 可读取的 `/www/wloc-node-status.json`，并绕过浏览器缓存，
+  页面刷新后可以显示最新指标。
+- AX6S Lite 保持单 worker 与适度 GC，不设置人为堆上限；AX6S 真机验证确认 5 个节点均有指标、
+  WIFICalling 只有 1 个 sing-box 进程，稳定性观察期间没有新的 OOM。
+
+## [1.3.0-r4] - 2026-08-28
+
+Hotfix for stale node metrics after a manual node test.
+
+- Refresh the node status, ping/latency, and quality cells immediately from
+  the `node_test` result.
+
+## [1.3.0-r3] - 2026-08-28
+
+Hotfix for an additional VLESS share-link encoding variant.
+
+- Accept Base64-encoded VLESS authorities using either `auto:UUID@host:port`
+  or `:UUID@host:port`.
+
+## [1.3.0-r2] - 2026-08-28
+
+Compatibility and stability release for node import and LuCI error handling.
+
+- Accept escaped and legacy VLESS Reality share links, including `peer`, `tls`,
+  `xtls`, `pbk`, and `sid` parameters.
+- Accept VLESS links whose `auto:UUID@host:port` authority is Base64-encoded.
+- Preserve passwords for URI user-info imports across AnyTLS, Hysteria2, TUIC,
+  and Trojan, and accept case-insensitive protocol names and WireGuard aliases.
+- Keep import errors visible above the modal and make the error close action
+  immediate and reliable.
+- Validate all six release assets with the eight-case OpenWrt installation
+  matrix and upgrade the AX6S Lite package in place.
+
 ## [1.3.0-r1] - 2026-08-24
 
 Bump the release line to 1.3.0-r1. Carries the Standard/Lite packaging and

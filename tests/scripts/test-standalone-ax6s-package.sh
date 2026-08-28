@@ -87,6 +87,8 @@ tar -xf "$output" -C "$tmp/result"
 control=$(tar -xOf "$tmp/result/control.tar.gz" ./control)
 conffiles=$(tar -xOf "$tmp/result/control.tar.gz" ./conffiles)
 postinst=$(tar -xOf "$tmp/result/control.tar.gz" ./postinst)
+preinst=$(tar -xOf "$tmp/result/control.tar.gz" ./preinst)
+prerm=$(tar -xOf "$tmp/result/control.tar.gz" ./prerm)
 data_members=$(tar -tzf "$tmp/result/data.tar.gz")
 
 printf '%s\n' "$output" | grep -F "/wificalling-location-gateway_${version}_aarch64_cortex-a53.ipk" >/dev/null ||
@@ -120,6 +122,23 @@ restart_line=$(printf '%s\n' "$postinst" | grep -n -F '/etc/init.d/wificalling-g
 	fail 'standalone post-install must create the Gateway runtime directory before restart'
 printf '%s\n' "$postinst" | grep -F 'rm -f /tmp/luci-indexcache.*' >/dev/null ||
 	fail 'standalone post-install must invalidate every LuCI menu cache variant'
+check_lifecycle() {
+	content=$1
+	phase=$2
+	printf '%s\n' "$content" | grep -F '/etc/init.d/wloc-service stop' >/dev/null ||
+		fail "standalone $phase must stop WLOC before package files change"
+	printf '%s\n' "$content" | grep -F '/etc/init.d/wificalling-gateway stop' >/dev/null ||
+		fail "standalone $phase must stop Gateway before package files change"
+	if printf '%s\n' "$content" | grep -F 'killall -q sing-box' >/dev/null; then
+		fail "standalone $phase must not kill unrelated sing-box services"
+	fi
+}
+check_lifecycle "$preinst" preinst
+check_lifecycle "$prerm" prerm
+for lifecycle in preinst prerm; do
+	tar -tvzf "$tmp/result/control.tar.gz" | grep -E "^-rwxr-xr-x .* \\./$lifecycle$" >/dev/null ||
+		fail "standalone $lifecycle must be executable in the control archive"
+done
 for member in \
 	'./etc/config/wificalling-gateway' \
 	'./etc/init.d/wificalling-gateway' \
@@ -137,6 +156,14 @@ fi
 # Gateway payload (compiler.sh endpoint + legacy branches, init.d field).
 mkdir -p "$tmp/result/data"
 tar -xzf "$tmp/result/data.tar.gz" -C "$tmp/result/data"
+view_suffix=$(printf '%s' "$version" | tr '.-' '__')
+versioned_view="$tmp/result/data/www/luci-static/resources/view/wificalling-gateway/wfc_overview_fix_$view_suffix.js"
+versioned_import="$tmp/result/data/www/luci-static/resources/wificalling-gateway/node-import_fix_$view_suffix.js"
+[ -f "$versioned_view" ] || fail 'standalone package must install a versioned WFC view'
+[ -f "$versioned_import" ] || fail 'standalone package must install a versioned node importer'
+grep -F "require wificalling-gateway.node-import_fix_$view_suffix as nodeImport" \
+	"$versioned_view" >/dev/null ||
+	fail 'versioned WFC view must load the versioned node importer'
 grep -F 'if (f[25]!="") s=s ",\"pre_shared_key\":" q(f[25])' \
 	"$tmp/result/data/usr/libexec/wificalling-gateway/compiler.sh" >/dev/null 2>&1 ||
 	fail 'standalone package must patch compiler.sh with pre_shared_key support'
@@ -151,29 +178,24 @@ grep -F 'device_guard_marker' \
 grep -F 'fail("device references unknown node: " $3)' \
 	"$tmp/result/data/usr/libexec/wificalling-gateway/compiler.sh" >/dev/null &&
 	fail 'standalone package must not keep the fail-hard unknown-node device path'
-grep -F 'wg_handshake_test' \
+grep -F 'node_proxy_test' \
 	"$tmp/result/data/usr/libexec/wificalling-gateway/node-health.sh" >/dev/null ||
-	fail 'standalone package must patch node-health.sh with the wireguard handshake test'
-[ "$(grep -c 'wg_handshake_test' "$tmp/result/data/usr/libexec/wificalling-gateway/node-health.sh")" -ge 2 ] ||
-	fail 'standalone package handshake patch must define and call wg_handshake_test'
-grep -F '[ -n "$reserved" ]' \
+	fail 'standalone package must use the existing Gateway sing-box for node tests'
+if grep -F 'sing-box run' "$tmp/result/data/usr/libexec/wificalling-gateway/node-health.sh" >/dev/null; then
+	fail 'standalone package node health must not start a temporary sing-box'
+fi
+grep -F '127.0.0.1' \
 	"$tmp/result/data/usr/libexec/wificalling-gateway/node-health.sh" >/dev/null ||
-	fail 'standalone package handshake patch must forward the reserved field'
+	fail 'standalone package node health must use a loopback probe'
 grep -F 'reason_json=' \
 	"$tmp/result/data/usr/libexec/wificalling-gateway/node-health.sh" >/dev/null ||
-	fail 'standalone package handshake patch must report a failure reason'
-grep -F 'config_missing' \
-	"$tmp/result/data/usr/libexec/wificalling-gateway/node-health.sh" >/dev/null ||
-	fail 'standalone package handshake patch must distinguish missing key material'
+	fail 'standalone package node health must report a failure reason'
 grep -F 'md5sum | cut -c1-4' \
 	"$tmp/result/data/usr/libexec/wificalling-gateway/node-health.sh" >/dev/null ||
-	fail 'standalone package handshake patch must derive the probe port from a busybox-safe hash'
-grep -F 'wg-health.lock' \
-	"$tmp/result/data/usr/libexec/wificalling-gateway/node-health.sh" >/dev/null ||
-	fail 'standalone package handshake patch must serialize concurrent handshake tests'
-grep -F 'kill -0' \
-	"$tmp/result/data/usr/libexec/wificalling-gateway/node-health.sh" >/dev/null ||
-	fail 'standalone package handshake patch must reclaim stale test locks'
+	fail 'standalone package node health must derive a busybox-safe probe port'
+grep -F 'probe_port_by_id' \
+	"$tmp/result/data/usr/libexec/wificalling-gateway/compiler.sh" >/dev/null ||
+	fail 'standalone package compiler must route per-node probe inbounds'
 grep -F 'compact_status_marker' \
 	"$tmp/result/data/usr/libexec/wificalling-gateway/node-health.sh" >/dev/null ||
 	fail 'standalone package must compact the node-status.json output'
@@ -184,9 +206,12 @@ grep -F '"reason":%s' \
 	fail 'standalone package compact output must include the handshake failure reason'
 # The manual per-node connection test helper must ship and be wired into
 # rpcd so the LuCI "Test connection" button can ask for a fresh check.
-grep -F 'wg_handshake_test' \
+grep -F '127.0.0.1' \
 	"$tmp/result/data/usr/libexec/wificalling-gateway/node-test.sh" >/dev/null ||
-	fail 'standalone package must ship the manual node test helper'
+	fail 'standalone package manual node test must use the running Gateway'
+if grep -F 'sing-box run' "$tmp/result/data/usr/libexec/wificalling-gateway/node-test.sh" >/dev/null; then
+	fail 'standalone package manual node test must not start a temporary sing-box'
+fi
 grep -F 'node_test' \
 	"$tmp/result/data/usr/libexec/rpcd/luci.wloc" >/dev/null ||
 	fail 'standalone package rpcd plugin must expose the node_test method'
