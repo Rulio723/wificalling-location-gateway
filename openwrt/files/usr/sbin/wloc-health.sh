@@ -44,8 +44,14 @@ if [ -f "$wloc_status" ]; then
 	[ -n "$wloc_exit" ] || wloc_exit=unknown
 	wloc_geo=$(grep -A10 '"geo":' "$wloc_status" | sed -n 's/.*"state"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
 	[ -n "$wloc_geo" ] || wloc_geo=unknown
-	wloc_err=$(sed -n 's/.*"last_error"[[:space:]]*:[[:space:]]*\([^,}]*\).*/\1/p' "$wloc_status" | head -n 1)
-	[ -n "$wloc_err" ] && wloc_error=$(json_escape "$wloc_err")
+	# Capture the INNER string and re-wrap it: escaping the already-quoted
+	# capture emitted invalid JSON, which killed the whole health page exactly
+	# while a probe error was showing. The greedy inner capture also survives
+	# commas inside the message.
+	wloc_err=$(sed -n 's/.*"last_error"[[:space:]]*:[[:space:]]*"\(.*\)".*/\1/p' "$wloc_status" | head -n 1)
+	if [ -n "$wloc_err" ]; then
+		wloc_error="\"$(json_escape "$wloc_err")\""
+	fi
 fi
 
 # --- wificalling-gateway / sing-box ---------------------------------------
@@ -100,6 +106,7 @@ patch_psk=0; patch_health=0; patch_compact=0; patch_device_guard=0
 }
 [ -f /usr/libexec/wificalling-gateway/node-health.sh ] && {
 	grep -q 'wg_handshake_test' /usr/libexec/wificalling-gateway/node-health.sh && patch_health=1
+	grep -q 'node_icmp_test' /usr/libexec/wificalling-gateway/node-health.sh && patch_health=1
 	grep -q 'compact_status_marker' /usr/libexec/wificalling-gateway/node-health.sh && patch_compact=1
 }
 

@@ -25,6 +25,7 @@ done
 ./tests/scripts/test-release-version.sh
 ./tests/scripts/test-monitor-temp-cleanup.sh
 ./tests/scripts/test-gateway-health-report.sh
+./tests/scripts/test-wloc-runtime-contract.sh
 ./tests/scripts/test-wloc-synthesis-default.sh
 ./tests/scripts/test-wloc-listener-nonblocking.sh
 python3 -m unittest discover -s tests -p 'test_*.py'
@@ -37,6 +38,10 @@ done
 
 if command -v shellcheck >/dev/null 2>&1; then
     find scripts -type f -name '*.sh' -exec shellcheck {} +
+else
+    # The lint gate must never vanish silently: CI installs shellcheck, so a
+    # local green run without it is not equivalent evidence.
+    echo 'WARNING: shellcheck not installed; shell lint gate skipped' >&2
 fi
 
 if [ -f go.mod ]; then

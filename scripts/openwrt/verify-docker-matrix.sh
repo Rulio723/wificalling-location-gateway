@@ -94,7 +94,8 @@ run_case() {
 	esac
 	container="wloc-matrix-${name}-$$"
 	containers="$containers $container"
-	docker image inspect "$image" >/dev/null 2>&1 || fail "missing Docker image: $image"
+	image_tag=${image%@*}
+	docker image inspect "$image_tag" >/dev/null 2>&1 || fail "missing Docker image: $image"
 	if [ "$manager" = apk ]; then
 		# Resolve dependencies before OpenWrt's firewall starts. Once init has
 		# applied its default policy, Docker Desktop's translated egress is no
@@ -103,7 +104,7 @@ run_case() {
 			--name "$container" -v "$dist_dir:/packages:ro" \
 			-e "WLG_PACKAGE_BASENAME=${package_path##*/}" \
 			--entrypoint /bin/sh "$image" -c \
-			'apk add --allow-untrusted "/packages/$WLG_PACKAGE_BASENAME" >/tmp/wlg-apk-install.log && exec /sbin/init' >/dev/null
+			'mkdir -p /usr/sbin; [ -e /usr/sbin/ip ] || ln -s /sbin/ip /usr/sbin/ip; apk add --allow-untrusted "/packages/$WLG_PACKAGE_BASENAME" >/tmp/wlg-apk-install.log && exec /sbin/init' >/dev/null
 	else
 		docker run -d --rm --privileged --pull never --platform "$platform" \
 			--name "$container" -v "$dist_dir:/packages:ro" \
@@ -111,7 +112,10 @@ run_case() {
 	fi
 
 	ready=0
-	for _attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45; do
+	# 90 s: the apk case pre-installs the package before init, and a slow
+	# network can stall that dependency resolution past 45 s without the
+	# package being at fault.
+	for _attempt in $(seq 1 90); do
 		if docker exec "$container" /bin/sh -c 'ubus list system >/dev/null 2>&1'; then
 			ready=1
 			break
@@ -134,7 +138,7 @@ run_case() {
 			docker exec "$container" /bin/sh -c '
 				printf "Package: sing-box\nVersion: 0-docker-smoke\nArchitecture: all\nStatus: install ok installed\n\n" >> /usr/lib/opkg/status
 				printf "%s\n" /usr/bin/sing-box > /usr/lib/opkg/info/sing-box.list
-				printf "#!/bin/sh\necho sing-box docker-smoke\n" > /usr/bin/sing-box
+				printf "#!/bin/sh\nwhile :; do sleep 60; done\n" > /usr/bin/sing-box
 				chmod 0755 /usr/bin/sing-box
 			'
 		fi
@@ -143,6 +147,27 @@ run_case() {
 			--add-arch "$package_arch:100" install --force-depends \
 			"/packages/${package_path##*/}" >/dev/null
 	fi
+	if [ "$variant" = standard ]; then
+		# Standard deliberately reuses the Gateway's single sing-box process.
+		# The rootfs smoke image has no Gateway daemon, so provide only that
+		# process shape before asserting that WLOC starts.
+		docker exec "$container" /bin/sh -c \
+			'/usr/bin/sing-box run -c /var/run/wificalling-gateway/sing-box.json >/tmp/wlg-sing-box.log 2>&1 &'
+	fi
+	# A production install gets this from LuCI. The minimal rootfs has no
+	# Gateway device policy, so configure one manual-mode test device before
+	# restarting the daemon.
+	docker exec "$container" /bin/sh -c \
+		"uci set wloc-service.main.assigned_device='192.0.2.10'; uci set wloc-service.main.geo_source='manual'; uci commit wloc-service"
+	# The rootfs has no WAN lease, so keep DNS out of this package smoke test.
+	# Production still uses the package's real resolver path.
+	docker exec "$container" /bin/sh -c \
+		"mkdir -p /usr/local/bin; printf '#!/bin/sh\\necho \"Address: 17.253.87.203\"\\n' > /usr/local/bin/nslookup; chmod 0755 /usr/local/bin/nslookup"
+	# The minimal 25.12 rootfs image ships without /etc/config/network;
+	# production firmware always defines a LAN subnet, which the redirect
+	# helper needs to validate the router's IPv4 ingress.
+	docker exec "$container" /bin/sh -c \
+		'[ -s /etc/config/network ] && grep -q "config interface.lan" /etc/config/network || { printf "config interface lan\n\toption device br-lan\n\toption proto static\n\toption ipaddr 192.168.1.1\n\toption netmask 255.255.255.0\n" > /etc/config/network; }'
 
 	if [ "$manager" = opkg ]; then
 		# --add-arch applies only to the install invocation in these minimal

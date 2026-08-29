@@ -187,14 +187,16 @@ return view.extend({
 		function renderLog(text) { dom.content(logBody, logRows(parseEvents(text))); dom.content(logCount, String(parseEvents(text).length)); }
 		renderLog(eventsText);
 
-		var clearLog = E('button', { class: 'btn cbi-button-negative', click: function() {
+		var clearLogBtn = E('button', { class: 'btn cbi-button-negative', click: function() {
 			ui.showModal(wlocI18n.t('Clear WLOC usage log?'), [E('p', {}, wlocI18n.t('This clears the local history of WLOC location events. Location interception settings are not affected.')),
 				E('div', { class: 'right' }, [E('button', { class: 'btn', click: ui.hideModal }, wlocI18n.t('Cancel')),
 				E('button', { class: 'btn cbi-button-negative', click: function() {
 					clearLog('wloc').then(function() {
+						// The emptied list and the closed modal are feedback
+						// enough; a second popup after the confirm dialog is
+						// noise.
 						renderLog('');
 						ui.hideModal();
-						ui.addNotification(null, E('p', {}, wlocI18n.t('WLOC usage log cleared.')), 'info');
 					}).catch(function(err) {
 						ui.hideModal();
 						ui.addNotification(null, E('p', {}, wlocI18n.t('Unable to clear log: ') + ' ' + err.message), 'error');
@@ -224,7 +226,7 @@ return view.extend({
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, wlocI18n.t('WLOC usage log')),
 				E('p', {}, wlocI18n.t('Records each location target update (time, place, source auto/manual). Raw WLOC responses are never recorded.')),
-				E('p', {}, [wlocI18n.t('Records: ') + ' ', logCount, ' ', clearLog]),
+				E('p', {}, [wlocI18n.t('Records: ') + ' ', logCount, ' ', clearLogBtn]),
 				E('table', { class: 'table' }, [
 					E('tr', { class: 'tr table-titles' }, [wlocI18n.t('Time'), wlocI18n.t('Event'), wlocI18n.t('Location'), wlocI18n.t('Source')].map(function(x) { return E('th', { class: 'th' }, x); })),
 					logBody

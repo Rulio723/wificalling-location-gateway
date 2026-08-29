@@ -1,6 +1,6 @@
 //! Validation boundary for exit observations.
 //!
-//! Network execution and sing-box process control are separate adapters. This
+//! Network execution uses the Gateway's existing sing-box probe listeners. This
 //! module accepts only a bounded, non-secret node reference and a fresh public
 //! address that differs from the router WAN address.
 
@@ -11,7 +11,10 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
 const MAX_NODE_REF_BYTES: usize = 64;
-const MAX_OBSERVATION_AGE: Duration = Duration::from_secs(300);
+/// Hard ceiling for an observation's accepted age. UCI `probe_interval` must
+/// be clamped to this value: a larger configured interval would make every
+/// observation fail `InvalidLimits` and permanently block auto-mode enable.
+pub const MAX_OBSERVATION_AGE: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NodeRef(String);

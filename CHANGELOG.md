@@ -2,6 +2,138 @@
 
 All notable changes are documented here. Versions follow Semantic Versioning.
 
+## [1.3.0-r13] - 2026-08-29
+
+Replaces the flat 32/64 MiB start-time memory thresholds with a computed
+requirement plus a bounded self-healing retry, on the proven integrated
+1.3.0-r1 Gateway baseline.
+
+- Lite cold start measures the real inflated runtime size (streamed through
+  wc -c) plus an 8 MiB margin instead of a flat 64 MiB; warm and standard
+  starts reserve 8 MiB only (the runtime heap is bounded by GOMEMLIMIT).
+- A refused start schedules a bounded background retry (30 s x 20) so a
+  temporarily memory-tight router self-heals instead of staying down until a
+  manual restart - observed live when an upgrade ipk in /tmp pushed
+  MemAvailable below the old flat gate.
+- Clearing a log closes the confirm modal and empties the list without a
+  second popup; error notifications are kept.
+
+### 中文说明
+
+在已验证的 1.3.0-r1 整合 Gateway 基线上，用"计算实际需求 + 自愈重试"取代
+平面式 32/64 MiB 启动内存阈值。
+
+- Lite 冷启动按流式测得的解压后真实大小 + 8 MiB 余量判定（不再使用固定
+  64 MiB）；热启动与 Standard 仅保留 8 MiB 紧急余量（堆增长已被 GOMEMLIMIT
+  约束）。
+- 预检拒绝后会安排有界后台重试（30 秒 x 20 次），内存缓解后自动拉起，不再
+  一直停摆到人工干预——升级时 /tmp 里的安装包把可用内存压到旧阈值以下的
+  真实场景由此自愈。
+- 清空日志后只关闭确认窗并刷新列表，不再弹第二个提示窗；报错提示保留。
+
+## [1.3.0-r12] - 2026-08-29
+
+Adds the requested preset auto-save on the proven integrated 1.3.0-r1
+Gateway baseline.
+
+- Applying a manual location automatically upserts it into the
+  saved-locations table: a search result is stored under its city label,
+  raw coordinates under "lat, lon"; re-applying the same place updates the
+  existing entry instead of duplicating it (dedupe by coordinates first).
+- The table refreshes immediately after apply; bilingual confirmation.
+- No daemon or protocol changes; presets remain plain UCI sections.
+
+### 中文说明
+
+在已验证的 1.3.0-r1 整合 Gateway 基线上增加用户期望的预设自动保存。
+
+- 应用手动定位时自动写入"已保存的位置"表：搜索结果以城市名保存，手输坐标
+  以"纬度, 经度"保存；同一地点重复应用会更新既有条目而不是产生重复
+  （先按坐标去重，再按标签）。
+- 应用后表格立即刷新并给出双语确认；守护进程与协议无变更，预设仍为普通
+  UCI 配置段。
+
+## [1.3.0-r11] - 2026-08-29
+
+LuCI error-path hardening on the proven integrated 1.3.0-r1 Gateway baseline.
+
+- Every rpc promise chain in the location settings view now handles rejection:
+  the Enable/Disable switch flips back with a visible error, and the Search and
+  Apply-coordinates buttons re-enable instead of staying dead until a page
+  reload.
+- No daemon or protocol changes; this release only ships the fixed LuCI views.
+
+### 中文说明
+
+在已验证的 1.3.0-r1 整合 Gateway 基线上的 LuCI 报错路径加固版本。
+
+- 定位设置页所有 rpc 调用链现在都会处理失败：启用/禁用开关失败时回弹并显示
+  错误，搜索与坐标应用按钮失败后恢复可用，不再需要刷新页面。
+
+## [1.3.0-r10] - 2026-08-29
+
+Audit-hardening release on the proven integrated 1.3.0-r1 Gateway baseline;
+closes the P0/P1 findings from the full-code audit at c6492df.
+
+- Every TPROXY install refreshes the upstream map and fails closed when DNS is
+  unavailable; disable/enable and sing-box crash recovery can no longer leave
+  interception silently broken while status shows healthy.
+- Disabled WLOC is genuinely fail-open: the init withdraws the DNS hijack,
+  TPROXY and upstream map when the UCI switch is off, and the stop path
+  restarts dnsmasq after removing the hijack block.
+- A failed startup enable is retried by the periodic tick; the exit probe uses
+  a bounded native HTTP client (no curl dependency on clean OpenWrt) and
+  `probe_interval` is clamped to the probe validator's window.
+- LuCI: nodeTest success renders as alive, the Clear-log button works, the
+  health page survives probe errors (last_error JSON fixed), the FAQ describes
+  the ICMP reality, and /proc/net/arp is granted to the gateway ACL.
+
+### 中文说明
+
+在已验证的 1.3.0-r1 整合 Gateway 基线上的审计加固版本；修复 c6492df 全量审计
+发现的 P0/P1 问题。
+
+- 每次 TPROXY 安装都会刷新上游映射，DNS 不可用时拒绝安装；禁用/启用与
+  sing-box 崩溃恢复不会再出现"状态健康但拦截实际失效"。
+- 禁用的 WLOC 真正 fail-open：init 按 UCI 开关撤除 DNS 劫持、TPROXY 与上游
+  映射；stop 路径删除劫持块后会重启 dnsmasq。
+- 启动期 enable 失败由周期任务自动重试；出口探测改用有界原生 HTTP 客户端
+  （干净 OpenWrt 无需 curl），`probe_interval` 钳制到校验器窗口内。
+- LuCI：nodeTest 成功正常显示、清除日志按钮恢复可用、健康页在探测报错时不再
+  失效（last_error JSON 修复）、FAQ 如实描述 ICMP 探测、/proc/net/arp 已授权。
+
+## [1.3.0-r9] - 2026-08-29
+
+WLOC reliability release, preserving the proven integrated 1.3.0-r1 Gateway
+baseline.
+
+- Intercept exactly six Apple WLOC hostnames, including
+  `gsp-ssl.ls.apple.com`.
+- Forward Apple's response and minimally replace only existing latitude,
+  longitude, and horizontal-accuracy fields; unknown fields, altitude,
+  vertical accuracy, motion state, and root records are preserved.
+- Handle HTTP/2 streams independently so a slow speculative request cannot
+  block a concurrent location response.
+- Treat rejected unrelated TLS/SNI traffic as a successful isolation boundary,
+  not a WLOC failure, and reset the per-process proxy-health snapshot at
+  startup.
+- Verified the AArch64 static runtime and a live AX6S restart: one shared
+  sing-box, WLOC `intercepting`, fresh proxy health, and more than 32 MiB
+  available memory after cleanup.
+
+### 中文说明
+
+WLOC 稳定性更新，继续以已验证的 1.3.0-r1 整合 Gateway 为基础。
+
+- 精确拦截六个 Apple WLOC 域名，其中包含 `gsp-ssl.ls.apple.com`。
+- 转发 Apple 原始响应，只替换已存在的纬度、经度和水平精度；未知字段、海拔、
+  垂直精度、运动状态与根记录全部保留。
+- HTTP/2 流独立处理，缓慢的预探测请求不会阻塞并发定位响应。
+- 拒绝无关 TLS/SNI 流量表示隔离有效，不再计为 WLOC 故障；服务启动时会重置本进程
+  的代理健康快照。
+- 已验证 AArch64 静态运行时及 AX6S 真机重启：仅一个共享 sing-box、WLOC 为
+  `intercepting`、健康快照全新且清理后可用内存高于 32 MiB。
+
 ## [1.3.0-r8] - 2026-08-28
 
 Standardized automatic WLOC location refresh after manual mode changes.
