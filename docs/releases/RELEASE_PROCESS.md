@@ -14,9 +14,10 @@ was already never committed or shared).
 - Private key: `~/.zcode/keys/wloc-signing.key` on the release machine
   (mode `0600`, never committed to git, never copied elsewhere)
 - Public key: `~/.zcode/keys/wloc-signing.pub`; published as `wloc.pub`
-  in the feed repository (`smthdagg/wificalling-location-gateway-feed`,
-  `gh-pages` branch serves the package source, `main` branch serves the
-  key file for `wget`)
+  in the feed repository (`smthdagg/Smthdagg-Repo-feeds`,
+  `gh-pages` branch serves per-project package directories (the WLOC
+  packages live in `wificalling-location-gateway/`), `main` branch serves
+  the key file for `wget` and the index generator script)
 - The public key is also referenced in the project README installation
   instructions. It must not change between releases.
 
@@ -71,11 +72,40 @@ This is also implemented as `scripts/openwrt/sign-feed.sh`.
 5. **Install test**: `verify-docker-matrix.sh --dist-dir
    dist/openwrt-release` (four environments) and a live upgrade on the
    AX6S test router.
-6. **Feed**: swap the release files in the feed repo `gh-pages` branch,
-   regenerate `Packages`/`Packages.gz`
-   (`scripts/gen-feed-index.sh`), sign with
-   `scripts/openwrt/sign-feed.sh` (same key as always), push `gh-pages`
-   and `main`. The `wloc.pub` does **not** change.
+5a. **Post-upgrade hygiene (AX6S, mandatory)**: remove every uploaded
+   installer package from `/tmp` in the same session that installed it
+   (`opkg install /tmp/x.ipk && rm -f /tmp/x.ipk`), delete any ad-hoc debug
+   backup directories created during the session, then
+   `sync; echo 3 > /proc/sys/vm/drop_caches` and re-read `MemAvailable`: it
+   must stay above the computed cold-start requirement of
+   `require_start_memory` (inflated Lite runtime + 8 MiB). Verify service
+   health (`wloc-health.sh`), the package version, and a single sing-box
+   process. Prefer the signed-feed upgrade
+   (`opkg update && opkg upgrade <package>`), which creates no `/tmp`
+   artifact at all.
+6. **Feed (private signed package source — mandatory, before tagging)**:
+   the index generator lives in the feed repository, not here. Standard
+   sequence (use the repository's noreply git identity — the feed repo
+   rejects pushes from personal-email commits):
+   a. `git clone --branch main https://github.com/smthdagg/Smthdagg-Repo-feeds.git /tmp/wloc-feed-main`
+      and `git clone --branch gh-pages https://github.com/smthdagg/Smthdagg-Repo-feeds.git /tmp/wloc-feed`.
+   b. In the `gh-pages` checkout: work inside the project subdirectory
+      (`wificalling-location-gateway/` — directory name must equal the
+      project repository name): remove superseded packages, copy the new
+      IPKs.
+   c. `/tmp/wloc-feed-main/scripts/gen-feed-index.sh
+      /tmp/wloc-feed/wificalling-location-gateway` (regenerates that
+      project's `Packages`/`Packages.gz`), then
+      `scripts/openwrt/sign-feed.sh /tmp/wloc-feed/wificalling-location-gateway`
+      (same long-lived key as always) — signing without regenerating the
+      index is forbidden.
+   d. Append a row to `UPDATES.md` (master update log), run
+      `/tmp/wloc-feed-main/scripts/feed-verify.sh /tmp/wloc-feed` (it must
+      pass: index integrity, signatures, checksums, log coverage), then
+      commit and push `gh-pages`. The feed `main` branch changes only if
+      `wloc.pub` or its docs change — also align the feed `README.md`
+      package table with the current release filenames.
+   e. `wloc.pub` does **not** change between releases.
 7. **GitHub**: tag `v<version>`, create the Release with the three
    packages, `SHA256SUMS`, and the signed `Packages`/`Packages.gz`(+`.sig`)
    assets, bilingual notes (English first, Chinese after).

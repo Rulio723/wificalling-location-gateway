@@ -158,9 +158,9 @@ Two ways to install:
 ```sh
 # Import the feed signing key (one-time)
 wget -O /etc/opkg/keys/f7050198aa77cf15 \
-  https://raw.githubusercontent.com/smthdagg/wificalling-location-gateway-feed/main/wloc.pub
+  https://raw.githubusercontent.com/smthdagg/Smthdagg-Repo-feeds/main/wloc.pub
 # Add the feed and install
-echo "src/gz wloc https://smthdagg.github.io/wificalling-location-gateway-feed" \
+echo "src/gz wloc https://smthdagg.github.io/Smthdagg-Repo-feeds/wificalling-location-gateway" \
   >> /etc/opkg/customfeeds.conf
 opkg update && opkg install wificalling-location-gateway
 ```
@@ -170,7 +170,7 @@ opkg update && opkg install wificalling-location-gateway
 and verify it against `SHA256SUMS` from the same release directory first.
 
 Full instructions for both methods live in the
-[feed repository](https://github.com/smthdagg/wificalling-location-gateway-feed)
+[feed repository](https://github.com/smthdagg/Smthdagg-Repo-feeds)
 (including the manual `.apk` install commands for OpenWrt 25.x).
 
 ### 2. Redmi AX6S (Lite recommended)
@@ -179,7 +179,7 @@ Full instructions for both methods live in the
 opkg install /tmp/wificalling-location-gateway-lite_1.3.0-r13_aarch64_cortex-a53.ipk
 ```
 
-Back up both UCI files first. On storage-constrained AX6S units, stop the services and remove the old integrated and sing-box packages before installing Lite; do not delete the saved UCI files. The r13 Lite package replaces the separate sing-box package and owns its transparent wrapper.
+Back up both UCI files first. On storage-constrained AX6S units, stop the services and remove the old integrated and sing-box packages before installing Lite; do not delete the saved UCI files. The r13 Lite package replaces the separate sing-box package and owns its transparent wrapper. `/tmp` is RAM: prefer the signed-feed upgrade (`opkg update && opkg upgrade wificalling-location-gateway-lite`), and when installing a local IPK, delete it right after installation (`opkg install /tmp/x.ipk && rm -f /tmp/x.ipk`) — leftover files in `/tmp` can push available memory below the cold-start memory gate.
 
 ### 3. OpenWrt 24.10 / iStoreOS 24.10 (IPK)
 
@@ -465,9 +465,9 @@ Lite 后缀只表示运行时所有权与内存策略不同，不是新项目，
 ```sh
 # 导入源签名公钥（一次性）
 wget -O /etc/opkg/keys/f7050198aa77cf15 \
-  https://raw.githubusercontent.com/smthdagg/wificalling-location-gateway-feed/main/wloc.pub
+  https://raw.githubusercontent.com/smthdagg/Smthdagg-Repo-feeds/main/wloc.pub
 # 添加源并安装
-echo "src/gz wloc https://smthdagg.github.io/wificalling-location-gateway-feed" \
+echo "src/gz wloc https://smthdagg.github.io/Smthdagg-Repo-feeds/wificalling-location-gateway" \
   >> /etc/opkg/customfeeds.conf
 opkg update && opkg install wificalling-location-gateway
 ```
@@ -477,7 +477,7 @@ opkg update && opkg install wificalling-location-gateway
 下载对应文件，并先校验同一发布目录中的 `SHA256SUMS`。
 
 两种方式的完整说明见
-[feed 仓库](https://github.com/smthdagg/wificalling-location-gateway-feed)（含
+[feed 仓库](https://github.com/smthdagg/Smthdagg-Repo-feeds)（含
 OpenWrt 25.x 的 `.apk` 手动安装命令）。
 
 ### 2. Redmi AX6S（推荐 Lite）
@@ -486,7 +486,7 @@ OpenWrt 25.x 的 `.apk` 手动安装命令）。
 opkg install /tmp/wificalling-location-gateway-lite_1.3.0-r13_aarch64_cortex-a53.ipk
 ```
 
-安装前先备份两份 UCI 配置。AX6S 空间不足时，先停止服务并卸载旧整合包和旧 sing-box 包，再安装 Lite；不要删除 UCI 配置。r13 Lite 会替代独立 sing-box 包并拥有透明启动包装器。
+安装前先备份两份 UCI 配置。AX6S 空间不足时，先停止服务并卸载旧整合包和旧 sing-box 包，再安装 Lite；不要删除 UCI 配置。r13 Lite 会替代独立 sing-box 包并拥有透明启动包装器。/tmp 是内存：优先使用签名软件源升级（`opkg update && opkg upgrade wificalling-location-gateway-lite`）；本地上传 IPK 安装后请立即删除（`opkg install /tmp/x.ipk && rm -f /tmp/x.ipk`）——/tmp 残留文件可能把可用内存压到冷启动内存门禁以下。
 
 ### 3. OpenWrt 24.10 / iStoreOS 24.10（IPK）
 
