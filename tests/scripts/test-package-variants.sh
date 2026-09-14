@@ -19,6 +19,17 @@ printf '#!/bin/sh\nexit 0\n' > "$tmp/wloc-service"
 printf '#!/bin/sh\nexit 0\n' > "$tmp/wloc-ctl"
 printf 'mock x86_64 sing-box tiny\n' > "$tmp/sing-box-x86_64"
 chmod 0755 "$tmp/wloc-service" "$tmp/wloc-ctl" "$tmp/sing-box-x86_64"
+
+# The release builder validates input ELF architecture; the stub binaries in
+# this test are shell scripts, so answer the arch probe with x86-64.
+mkdir -p "$tmp/mock-bin"
+cat > "$tmp/mock-bin/file" <<'FILE'
+#!/bin/sh
+printf '%s: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV)\n' "$1"
+FILE
+chmod 0755 "$tmp/mock-bin/file"
+PATH="$tmp/mock-bin:$PATH"
+export PATH
 tiny_sha=$(shasum -a 256 "$tmp/sing-box-x86_64" | awk '{print $1}')
 
 plan=$(
@@ -32,10 +43,10 @@ plan=$(
 )
 
 for expected in \
-	'wificalling-location-gateway_1.3.0-r15_x86_64.ipk' \
-	'wificalling-location-gateway-lite_1.3.0-r15_x86_64.ipk' \
-	'wificalling-location-gateway-1.3.0-r15.apk' \
-	'wificalling-location-gateway-lite-1.3.0-r15.apk'; do
+	'wificalling-location-gateway_1.3.0-r16_x86_64.ipk' \
+	'wificalling-location-gateway-lite_1.3.0-r16_x86_64.ipk' \
+	'wificalling-location-gateway-1.3.0-r16.apk' \
+	'wificalling-location-gateway-lite-1.3.0-r16.apk'; do
 	printf '%s\n' "$plan" | grep -F "$expected" >/dev/null ||
 		fail "dual-variant plan is missing $expected"
 done

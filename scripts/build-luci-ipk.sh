@@ -2,7 +2,7 @@
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
-version=${1:-1.3.0-r15}
+version=${1:-1.3.0-r16}
 dependency_mode=${2:-production}
 package=luci-app-wificalling-location-gateway
 source_dir="$root/openwrt/$package/files"
@@ -190,6 +190,15 @@ PY
 			ctl_bin=${WLOC_CTL_BIN:-$out_dir/wloc-ctl_aarch64-openwrt-linux-musl}
 			[ -x "$service_bin" ] || { echo "missing WLOC service binary: $service_bin" >&2; exit 2; }
 			[ -x "$ctl_bin" ] || { echo "missing WLOC control binary: $ctl_bin" >&2; exit 2; }
+			# Architecture gate: a wrong-arch runtime binary (e.g. x86_64 for
+			# the AX6S build) otherwise packages cleanly and only fails on the
+			# router at exec time.
+			for arch_bin in "$service_bin" "$ctl_bin"; do
+				case "$(file "$arch_bin" 2>/dev/null)" in
+					*ELF*ARM\ aarch64*) ;;
+					*) echo "runtime binary must be an AArch64 ELF: $arch_bin" >&2; exit 2 ;;
+				esac
+			done
 			mkdir -p "$stage/data/etc/config" "$stage/data/etc/init.d" "$stage/data/usr/sbin"
 			cp "$root/openwrt/files/etc/config/wloc-service" "$stage/data/etc/config/wloc-service"
 			cp "$root/openwrt/files/etc/init.d/wloc-service" "$stage/data/etc/init.d/wloc-service"

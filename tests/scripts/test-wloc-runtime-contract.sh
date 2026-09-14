@@ -6,6 +6,7 @@ redirect="$repo_root/openwrt/files/usr/sbin/wloc-redirect-sync.sh"
 refresh="$repo_root/openwrt/files/usr/sbin/wloc-refresh-set.sh"
 service="$repo_root/openwrt/files/etc/init.d/wloc-service"
 gateway_service="$repo_root/openwrt/files/etc/init.d/wificalling-gateway"
+gateway_firewall="$repo_root/openwrt/files/usr/libexec/wificalling-gateway/firewall.sh"
 rust="$repo_root/src/lib.rs"
 daemon="$repo_root/src/bin/wloc-service.rs"
 
@@ -13,6 +14,30 @@ grep -F 'if [ "$action" = stop ]; then' "$redirect" >/dev/null ||
 	{ echo 'WLOC redirect helper must support explicit teardown' >&2; exit 1; }
 grep -F '/usr/sbin/wloc-redirect-sync.sh stop' "$service" >/dev/null ||
 	{ echo 'WLOC init stop must remove owned firewall state' >&2; exit 1; }
+# Static-route lifecycle: TPROXY interception lives or dies with the device
+# scope. An install adds the rule+route, a stop removes them, and ANY nonzero
+# sync exit must withdraw the state of a previously bound device via the
+# fail-open trap (deleting the last device or a failed install must never
+# leave a stale route or a half-installed hijack behind).
+grep -F 'ip rule add fwmark "$FWMARK" lookup "$ROUTE_TABLE"' "$redirect" >/dev/null ||
+	{ echo 'WLOC redirect install must add the fwmark rule for its route table' >&2; exit 1; }
+grep -F 'ip route add local 0.0.0.0/0 dev lo table "$ROUTE_TABLE"' "$redirect" >/dev/null ||
+	{ echo 'WLOC redirect install must add the local return route' >&2; exit 1; }
+grep -F 'ip rule del fwmark "$FWMARK" lookup "$ROUTE_TABLE"' "$redirect" >/dev/null ||
+	{ echo 'WLOC teardown must delete the fwmark rule' >&2; exit 1; }
+grep -F 'ip route del local 0.0.0.0/0 dev lo table "$ROUTE_TABLE"' "$redirect" >/dev/null ||
+	{ echo 'WLOC teardown must delete the local return route' >&2; exit 1; }
+withdraw_line=$(grep -n 'WLOC_WITHDRAW_GUARD=1' "$redirect" | head -n 1 | cut -d: -f1)
+stop_line=$(grep -n 'if \[ "\$action" = stop \]; then' "$redirect" | head -n 1 | cut -d: -f1)
+guard_line=$(grep -n 'if \[ -z "\${WLOC_WITHDRAW_GUARD:-}" \]; then' "$redirect" | head -n 1 | cut -d: -f1)
+[ -n "$withdraw_line" ] && [ -n "$stop_line" ] && [ "$withdraw_line" -lt "$stop_line" ] ||
+	{ echo 'WLOC redirect must arm its fail-open withdrawal before the stop branch' >&2; exit 1; }
+[ -n "$guard_line" ] ||
+	{ echo 'WLOC withdrawal trap must guard against stop re-entry recursion' >&2; exit 1; }
+# Gateway firewall: no clients means no interception; the start action must
+# withdraw the previous rule/route/table instead of leaving them installed.
+[ "$(grep -cF 'ip route flush table 166' "$gateway_firewall")" -ge 2 ] ||
+	{ echo 'Gateway firewall must flush its route on stop and on an empty client set' >&2; exit 1; }
 grep -F 'APPROVED_WLOC_HOSTS: [&str; 6]' "$rust" >/dev/null ||
 	{ echo 'Rust interception allowlist must contain exactly six hosts' >&2; exit 1; }
 grep -F 'HOSTS="gs-loc.apple.com gs-loc-cn.apple.com gsp-ssl.ls.apple.com bluedot.is.autonavi.com bluedot.is.autonavi.com.gds.alibabadns.com gspe19-cn-ssl-ls-apple-com.v.aaplimg.com"' "$refresh" >/dev/null ||

@@ -18,28 +18,39 @@ grep -F 'webpki-roots = "=1.0.9"' "$repo_root/Cargo.toml" >/dev/null ||
 	fail 'version bumps must not rewrite pinned dependency versions'
 grep -Fx 'PKG_VERSION:=1.3.0' "$repo_root/openwrt/Makefile" >/dev/null ||
 	fail 'OpenWrt runtime version must be 1.3.0'
-grep -Fx 'PKG_RELEASE:=15' "$repo_root/openwrt/Makefile" >/dev/null ||
-	fail 'OpenWrt runtime release must be 15'
+grep -Fx 'PKG_RELEASE:=16' "$repo_root/openwrt/Makefile" >/dev/null ||
+	fail 'OpenWrt runtime release must be 16'
 grep -Fx 'PKG_VERSION:=1.3.0' "$repo_root/openwrt/luci-app-wificalling-location-gateway/Makefile" >/dev/null ||
 	fail 'LuCI package version must be 1.3.0'
-grep -Fx 'PKG_RELEASE:=15' "$repo_root/openwrt/luci-app-wificalling-location-gateway/Makefile" >/dev/null ||
-	fail 'LuCI package release must be 15'
+grep -Fx 'PKG_RELEASE:=16' "$repo_root/openwrt/luci-app-wificalling-location-gateway/Makefile" >/dev/null ||
+	fail 'LuCI package release must be 16'
 
 printf '#!/bin/sh\nexit 0\n' > "$tmp/wloc-service"
 printf '#!/bin/sh\nexit 0\n' > "$tmp/wloc-ctl"
 chmod 0755 "$tmp/wloc-service" "$tmp/wloc-ctl"
+
+# The release builder validates input ELF architecture; the stub binaries in
+# this test are shell scripts, so answer the arch probe with x86-64.
+mkdir -p "$tmp/mock-bin"
+cat > "$tmp/mock-bin/file" <<'FILE'
+#!/bin/sh
+printf '%s: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV)\n' "$1"
+FILE
+chmod 0755 "$tmp/mock-bin/file"
+PATH="$tmp/mock-bin:$PATH"
+export PATH
 plan=$(
 	"$repo_root/scripts/openwrt/build-release-packages.sh" --plan \
 		--arch x86_64 --service-bin "$tmp/wloc-service" --ctl-bin "$tmp/wloc-ctl"
 )
 for expected in \
-	'wificalling-location-gateway_1.3.0-r15_x86_64.ipk' \
-	'wificalling-location-gateway-1.3.0-r15.apk'; do
+	'wificalling-location-gateway_1.3.0-r16_x86_64.ipk' \
+	'wificalling-location-gateway-1.3.0-r16.apk'; do
 	printf '%s\n' "$plan" | grep -F "$expected" >/dev/null ||
 		fail "release plan is missing $expected"
 done
 
-grep -F 'version=${1:-1.3.0-r15}' "$repo_root/scripts/build-luci-ipk.sh" >/dev/null ||
-	fail 'AX6S standalone builder default must be 1.3.0 release 15'
+grep -F 'version=${1:-1.3.0-r16}' "$repo_root/scripts/build-luci-ipk.sh" >/dev/null ||
+	fail 'AX6S standalone builder default must be 1.3.0 release 16'
 
 printf '%s\n' 'release version tests passed'
